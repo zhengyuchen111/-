@@ -1,151 +1,169 @@
-from flask import Flask, render_template, request, redirect, url_for, session
+from flask import Flask, render_template, request, redirect, url_for, session, flash
 from datetime import datetime, timedelta
+from flask_sqlalchemy import SQLAlchemy
+from functools import wraps
 import re
 
 app = Flask(__name__)
-app.secret_key = 'score_system_key'
-
-# 使用字典存储数据（替代数据库）
-# 用户数据
-users = {
-    'zhangsan': {'password': '123', 'email': 'zhangsan@example.com', 'id': 1},
-    'lisi': {'password': '456', 'email': 'lisi@example.com', 'id': 2},
-    'wangwu': {'password': '789', 'email': 'wangwu@example.com', 'id': 3},
-    'zhaoliu': {'password': '000', 'email': 'zhaoliu@example.com', 'id': 4},
-    'qianqi': {'password': '111', 'email': 'qianqi@example.com', 'id': 5}
-}
-
-# 管理员数据
-admins = {
-    'admin': {'password': 'admin123', 'id': 1}
-}
-
-# 成绩数据
-scores = {
-    # 张三的成绩
-    1: [
-        {'subject': '数学', 'grade': 95},
-        {'subject': '语文', 'grade': 88},
-        {'subject': '英语', 'grade': 92}
-    ],
-    # 李四的成绩
-    2: [
-        {'subject': '数学', 'grade': 82},
-        {'subject': '语文', 'grade': 90},
-        {'subject': '英语', 'grade': 76}
-    ],
-    # 王五的成绩
-    3: [
-        {'subject': '数学', 'grade': 78},
-        {'subject': '语文', 'grade': 85},
-        {'subject': '英语', 'grade': 90}
-    ],
-    # 赵六的成绩
-    4: [
-        {'subject': '数学', 'grade': 92},
-        {'subject': '语文', 'grade': 80},
-        {'subject': '英语', 'grade': 88}
-    ],
-    # 钱七的成绩
-    5: [
-        {'subject': '数学', 'grade': 85},
-        {'subject': '语文', 'grade': 93},
-        {'subject': '英语', 'grade': 79}
-    ]
-}
+app.secret_key = 'score_system_key_2025'
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///school_management.db'
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+db = SQLAlchemy(app)
 
 
-# 计算所有学生的总成绩和排名
-def get_ranking_data():
-    total_scores = {}
-
-    for username, user_data in users.items():
-        user_id = user_data['id']
-        if user_id in scores:
-            total = sum(score['grade'] for score in scores[user_id])
-            total_scores[username] = total
-
-    # 按总分降序排序
-    sorted_ranking = sorted(total_scores.items(), key=lambda x: x[1], reverse=True)
-    return sorted_ranking
+# 数据库模型定义（保持不变）
+class User(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(50), unique=True, nullable=False)
+    email = db.Column(db.String(100), unique=True, nullable=False)
+    password = db.Column(db.String(100), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.now)
+    is_active = db.Column(db.Boolean, default=True)
+    student = db.relationship('Student', backref='user', uselist=False, lazy=True)
 
 
-# 获取用户ID
-def get_user_id(username):
-    if username in users:
-        return users[username]['id']
-    return None
+class Admin(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(50), unique=True, nullable=False)
+    email = db.Column(db.String(100), unique=True, nullable=False)
+    password = db.Column(db.String(100), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.now)
+    is_super = db.Column(db.Boolean, default=False)
 
 
-# 验证用户登录（支持用户名或邮箱）
-def authenticate_user(login_id, password):
-    # 检查是否是邮箱登录
-    if '@' in login_id:
-        for username, user_data in users.items():
-            if user_data.get('email') == login_id and user_data['password'] == password:
-                return username
-        return None
-    # 用户名登录
-    elif login_id in users and users[login_id]['password'] == password:
-        return login_id
-    return None
+class Student(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    student_id = db.Column(db.String(20), unique=True, nullable=False)
+    name = db.Column(db.String(50), nullable=False)
+    gender = db.Column(db.String(10))
+    birth_date = db.Column(db.Date)
+    class_name = db.Column(db.String(50))
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    grades = db.relationship('Grade', backref='student', lazy=True, cascade="all, delete-orphan")
 
 
-# 验证管理员登录
-def authenticate_admin(username, password):
-    return username in admins and admins[username]['password'] == password
+class Course(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    course_code = db.Column(db.String(20), unique=True, nullable=False)
+    course_name = db.Column(db.String(100), nullable=False)
+    credit = db.Column(db.Float, default=1.0)
+    semester = db.Column(db.String(20))
+    grades = db.relationship('Grade', backref='course', lazy=True)
 
 
-# 获取用户成绩
-def get_user_scores(username):
-    user_id = get_user_id(username)
-    if user_id and user_id in scores:
-        return scores[user_id]
-    return []
+class Grade(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    student_id = db.Column(db.Integer, db.ForeignKey('student.id'), nullable=False)
+    course_id = db.Column(db.Integer, db.ForeignKey('course.id'), nullable=False)
+    score = db.Column(db.Float, nullable=False)
+    grade_level = db.Column(db.String(10))
+    exam_date = db.Column(db.Date, default=datetime.now)
+    __table_args__ = (db.UniqueConstraint('student_id', 'course_id', name='unique_student_course'),)
 
 
-# 视图函数：home
+# 初始化数据库
+with app.app_context():
+    db.create_all()
+    if not Admin.query.filter_by(username='admin').first():
+        admin = Admin(username='admin', email='admin@example.com', password='admin123', is_super=True)
+        db.session.add(admin)
+        db.session.commit()
+    if not Course.query.first():
+        courses = [
+            Course(course_code='MATH101', course_name='高等数学', credit=4.0, semester='2025-1'),
+            Course(course_code='ENG101', course_name='大学英语', credit=3.0, semester='2025-1'),
+            Course(course_code='PHY101', course_name='大学物理', credit=3.5, semester='2025-1'),
+            Course(course_code='PROG101', course_name='程序设计基础', credit=3.0, semester='2025-1'),
+            Course(course_code='POL101', course_name='思想政治', credit=2.0, semester='2025-1')
+        ]
+        db.session.add_all(courses)
+        db.session.commit()
+
+
+# 辅助函数
+def calculate_grade_level(score):
+    if score >= 90:
+        return '优'
+    elif score >= 80:
+        return '良'
+    elif score >= 70:
+        return '中'
+    elif score >= 60:
+        return '及格'
+    else:
+        return '不及格'
+
+
+# 装饰器
+def login_required(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if 'username' not in session or datetime.now().timestamp() >= session.get('expires_at', 0):
+            return redirect(url_for('login'))
+        return f(*args, **kwargs)
+
+    return decorated
+
+
+def admin_required(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if 'username' not in session or session.get('role') != 'admin':
+            return redirect(url_for('admin_login'))
+        return f(*args, **kwargs)
+
+    return decorated
+
+
+# 路由 - 独立登录界面
 @app.route('/')
-def home():
-    if 'username' in session and datetime.now().timestamp() < session.get('expires_at', 0):
-        return redirect(url_for('score'))
+def index():
     return redirect(url_for('login'))
 
 
-# 视图函数：login
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
         username = request.form.get('username')
         password = request.form.get('password')
-        login_type = request.form.get('login_type', 'user')
 
-        # 管理员登录验证
-        if login_type == 'admin':
-            if authenticate_admin(username, password):
-                session['username'] = username
-                session['role'] = 'admin'
-                session['expires_at'] = (datetime.now() + timedelta(minutes=30)).timestamp()
-                return redirect(url_for('admin_dashboard'))
-            return render_template('login.html', error='管理员账号或密码错误',
-                                   username=username)
+        # 用户登录验证
+        user = User.query.filter_by(username=username, password=password).first()
+        if not user and '@' in username:
+            user = User.query.filter_by(email=username, password=password).first()
 
-        # 用户登录验证（支持用户名或邮箱）
-        authenticated_user = authenticate_user(username, password)
-        if authenticated_user:
-            session['username'] = authenticated_user
+        if user and user.is_active:
+            session['username'] = user.username
             session['role'] = 'user'
-            session['expires_at'] = (datetime.now() + timedelta(minutes=30)).timestamp()
-            return redirect(url_for('score'))
+            session['user_id'] = user.id
+            session['expires_at'] = (datetime.now() + timedelta(hours=2)).timestamp()
+            return redirect(url_for('user_dashboard'))
 
-        # 友好的错误提示
-        error_msg = '用户名/邮箱或密码错误，请重试'
-        return render_template('login.html', error=error_msg, username=username)
+        flash('用户名/密码错误或账号已禁用', 'error')
 
     return render_template('login.html')
 
 
-# 注册功能
+@app.route('/admin/login', methods=['GET', 'POST'])
+def admin_login():
+    if request.method == 'POST':
+        username = request.form.get('username')
+        password = request.form.get('password')
+
+        # 管理员登录验证
+        admin = Admin.query.filter_by(username=username, password=password).first()
+        if admin:
+            session['username'] = admin.username
+            session['role'] = 'admin'
+            session['user_id'] = admin.id
+            session['expires_at'] = (datetime.now() + timedelta(hours=2)).timestamp()
+            return redirect(url_for('admin_dashboard'))
+
+        flash('管理员账号或密码错误', 'error')
+
+    return render_template('admin_login.html')
+
+
 @app.route('/register', methods=['GET', 'POST'])
 def register():
     if request.method == 'POST':
@@ -154,96 +172,158 @@ def register():
         password = request.form.get('password')
         confirm_password = request.form.get('confirm_password')
 
-        # 表单验证
-        errors = {}
-
-        # 用户名验证
-        if not username or len(username) < 3:
-            errors['username_error'] = '用户名至少需要3个字符'
-        elif username in users:
-            errors['username_error'] = '用户名已存在'
-
-        # 邮箱验证
-        email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
-        if not email or not re.match(email_pattern, email):
-            errors['email_error'] = '请输入有效的邮箱地址'
-        else:
-            # 检查邮箱是否已存在
-            for user_data in users.values():
-                if user_data.get('email') == email:
-                    errors['email_error'] = '邮箱已被注册'
-                    break
-
-        # 密码验证
-        if not password or len(password) < 6:
-            errors['password_error'] = '密码至少需要6个字符'
-
-        # 确认密码验证
         if password != confirm_password:
-            errors['confirm_error'] = '两次输入的密码不一致'
+            flash('两次密码不一致', 'error')
+            return render_template('register.html', username=username, email=email)
 
-        # 如果有错误，返回表单并显示错误信息
-        if errors:
-            return render_template('register.html', **errors,
-                                   username=username, email=email)
+        if User.query.filter_by(username=username).first():
+            flash('用户名已存在', 'error')
+            return render_template('register.html', email=email)
 
-        # 创建新用户（内存中）
-        new_user_id = max([user['id'] for user in users.values()]) + 1 if users else 1
-        users[username] = {
-            'password': password,
-            'email': email,
-            'id': new_user_id
-        }
+        if User.query.filter_by(email=email).first():
+            flash('邮箱已被注册', 'error')
+            return render_template('register.html', username=username)
 
-        # 为新用户创建空成绩记录
-        scores[new_user_id] = []
-
-        return render_template('register.html', success='注册成功！请登录')
+        new_user = User(username=username, email=email, password=password)
+        db.session.add(new_user)
+        db.session.commit()
+        flash('注册成功，请登录', 'success')
+        return redirect(url_for('login'))
 
     return render_template('register.html')
 
 
-# 管理员面板
-@app.route('/admin')
+# 用户功能 - 只能查看自己的数据
+@app.route('/user/dashboard')
+@login_required
+def user_dashboard():
+    user = User.query.get(session['user_id'])
+    student = user.student
+    grades = []
+    if student:
+        grades = Grade.query.join(Course).filter(Grade.student_id == student.id).all()
+
+    return render_template('user/dashboard.html', user=user, student=student, grades=grades)
+
+
+@app.route('/user/profile', methods=['GET', 'POST'])
+@login_required
+def user_profile():
+    user = User.query.get(session['user_id'])
+    student = user.student
+
+    if request.method == 'POST':
+        user.email = request.form.get('email')
+        if request.form.get('password'):
+            user.password = request.form.get('password')
+
+        if student:
+            student.name = request.form.get('name')
+            student.gender = request.form.get('gender')
+            student.class_name = request.form.get('class_name')
+            student.student_id = request.form.get('student_id')
+            if request.form.get('birth_date'):
+                student.birth_date = datetime.strptime(request.form.get('birth_date'), '%Y-%m-%d').date()
+        else:
+            new_student = Student(
+                student_id=request.form.get('student_id'),
+                name=request.form.get('name'),
+                gender=request.form.get('gender'),
+                class_name=request.form.get('class_name'),
+                birth_date=datetime.strptime(request.form.get('birth_date'), '%Y-%m-%d').date() if request.form.get(
+                    'birth_date') else None,
+                user_id=user.id
+            )
+            db.session.add(new_student)
+
+        db.session.commit()
+        flash('资料更新成功', 'success')
+        return redirect(url_for('user_dashboard'))
+
+    return render_template('user/profile.html', user=user, student=student)
+
+
+@app.route('/user/grades', methods=['GET', 'POST'])
+@login_required
+def user_grades():
+    user = User.query.get(session['user_id'])
+    student = user.student
+
+    if not student:
+        flash('请先完善学生信息', 'warning')
+        return redirect(url_for('user_profile'))
+
+    if request.method == 'POST':
+        course_id = request.form.get('course_id')
+        score = float(request.form.get('score'))
+
+        existing_grade = Grade.query.filter_by(student_id=student.id, course_id=course_id).first()
+        if existing_grade:
+            existing_grade.score = score
+            existing_grade.grade_level = calculate_grade_level(score)
+        else:
+            new_grade = Grade(
+                student_id=student.id,
+                course_id=course_id,
+                score=score,
+                grade_level=calculate_grade_level(score)
+            )
+            db.session.add(new_grade)
+
+        db.session.commit()
+        flash('成绩保存成功', 'success')
+        return redirect(url_for('user_grades'))
+
+    courses = Course.query.all()
+    grades = Grade.query.join(Course).filter(Grade.student_id == student.id).all()
+
+    return render_template('user/grades.html', user=user, student=student, courses=courses, grades=grades)
+
+
+@app.route('/user/grades/delete/<int:grade_id>', methods=['POST'])
+@login_required
+def delete_grade(grade_id):
+    grade = Grade.query.get_or_404(grade_id)
+    user = User.query.get(session['user_id'])
+
+    if grade.student.user_id != user.id:
+        flash('无权删除该成绩', 'error')
+        return redirect(url_for('user_grades'))
+
+    db.session.delete(grade)
+    db.session.commit()
+    flash('成绩已删除', 'success')
+    return redirect(url_for('user_grades'))
+
+
+# 管理员功能
+@app.route('/admin/dashboard')
+@admin_required
 def admin_dashboard():
-    if 'username' not in session or session.get('role') != 'admin':
-        return redirect(url_for('login', type='admin'))
+    user_count = User.query.count()
+    student_count = Student.query.count()
+    course_count = Course.query.count()
+    grade_count = Grade.query.count()
 
-    return render_template('admin.html', users=users)
-
-
-@app.route('/score')
-def score():
-    if 'username' not in session or datetime.now().timestamp() >= session.get('expires_at', 0):
-        return redirect(url_for('login'))
-
-    username = session['username']
-    # 获取当前用户的成绩
-    user_scores = get_user_scores(username)
-    user_scores_list = [(score['subject'], score['grade']) for score in user_scores]
-    user_total = sum(grade for _, grade in user_scores_list)
-    ranking_data = get_ranking_data()  # 获取排名数据
-
-    # 获取当前用户的排名
-    current_rank = [i + 1 for i, (user, _) in enumerate(ranking_data) if user == username][0]
-
-    # 处理排名数据，添加索引
-    ranking_with_index = [(i + 1, user, total) for i, (user, total) in enumerate(ranking_data)]
-
-    return render_template('score.html',
-                           username=username,
-                           scores=user_scores_list,
-                           user_total=user_total,
-                           ranking_data=ranking_with_index,  # 传递处理后的数据
-                           current_rank=current_rank)
+    return render_template('admin/dashboard.html',
+                           user_count=user_count, student_count=student_count,
+                           course_count=course_count, grade_count=grade_count)
 
 
-# 视图函数：logoff
-@app.route('/logoff')
-def logoff():
+@app.route('/admin/users')
+@admin_required
+def admin_users():
+    page = request.args.get('page', 1, type=int)
+    users = User.query.order_by(User.created_at.desc()).paginate(page=page, per_page=10)
+    return render_template('admin/users.html', users=users)
+
+
+@app.route('/logout')
+def logout():
     session.clear()
+    flash('已成功退出登录', 'success')
     return redirect(url_for('login'))
 
 
 if __name__ == '__main__':
-    app.run(debug=False)
+    app.run(debug=True)

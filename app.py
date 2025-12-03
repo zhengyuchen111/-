@@ -383,6 +383,84 @@ def admin_students():
     return render_template('admin/students.html', students=students, search=search)
 
 
+# 在admin_required装饰器之后添加以下路由
+@app.route('/admin/students/add', methods=['POST'])
+@admin_required
+def admin_add_student():
+    student_id = request.form.get('student_id')
+    name = request.form.get('name')
+    gender = request.form.get('gender')
+    class_name = request.form.get('class_name')
+
+    # 检查学号是否已存在
+    existing_student = Student.query.filter_by(student_id=student_id).first()
+    if existing_student:
+        flash('学号已存在！', 'error')
+        return redirect(url_for('admin_students'))
+
+    # 创建用户账号（默认密码123456）
+    username = f"student_{student_id[-4:]}"
+    email = f"{student_id}@school.com"
+
+    # 确保用户名唯一
+    if User.query.filter_by(username=username).first():
+        username = f"student_{student_id}"
+
+    # 创建用户和学生记录
+    new_user = User(
+        username=username,
+        email=email,
+        password='123456'  # 默认密码
+    )
+    db.session.add(new_user)
+    db.session.flush()  # 获取user.id但不提交
+
+    new_student = Student(
+        student_id=student_id,
+        name=name,
+        gender=gender,
+        class_name=class_name,
+        user_id=new_user.id
+    )
+    db.session.add(new_student)
+    db.session.commit()
+
+    flash(f'学生添加成功！账号：{username}，默认密码：123456', 'success')
+    return redirect(url_for('admin_students'))
+
+
+# 同时添加编辑和删除学生的路由
+@app.route('/admin/students/edit/<int:student_id>', methods=['POST'])
+@admin_required
+def admin_edit_student(student_id):
+    student = Student.query.get_or_404(student_id)
+    student.name = request.form.get('name')
+    student.gender = request.form.get('gender')
+    student.class_name = request.form.get('class_name')
+
+    if request.form.get('birth_date'):
+        student.birth_date = datetime.strptime(request.form.get('birth_date'), '%Y-%m-%d').date()
+
+    db.session.commit()
+    flash('学生信息更新成功！', 'success')
+    return redirect(url_for('admin_students'))
+
+
+@app.route('/admin/students/delete/<int:student_id>', methods=['POST'])
+@admin_required
+def admin_delete_student(student_id):
+    student = Student.query.get_or_404(student_id)
+
+    # 删除关联的用户账号
+    if student.user:
+        db.session.delete(student.user)
+
+    db.session.delete(student)
+    db.session.commit()
+    flash('学生信息已删除！', 'success')
+    return redirect(url_for('admin_students'))
+
+
 @app.route('/admin/student/<int:student_id>')
 @admin_required
 def admin_student_detail(student_id):
@@ -399,18 +477,77 @@ def admin_courses():
     return render_template('admin/courses.html', courses=courses)
 
 
+# 课程管理路由
+@app.route('/admin/courses/add', methods=['POST'])
+@admin_required
+def admin_add_course():
+    course_code = request.form.get('course_code')
+    course_name = request.form.get('course_name')
+    credit = float(request.form.get('credit'))
+    semester = request.form.get('semester')
+
+    existing_course = Course.query.filter_by(course_code=course_code).first()
+    if existing_course:
+        flash('课程代码已存在！', 'error')
+        return redirect(url_for('admin_courses'))
+
+    new_course = Course(
+        course_code=course_code,
+        course_name=course_name,
+        credit=credit,
+        semester=semester
+    )
+    db.session.add(new_course)
+    db.session.commit()
+    flash('课程添加成功！', 'success')
+    return redirect(url_for('admin_courses'))
+
+
+@app.route('/admin/courses/edit/<int:course_id>', methods=['POST'])
+@admin_required
+def admin_edit_course(course_id):
+    course = Course.query.get_or_404(course_id)
+    course.course_name = request.form.get('course_name')
+    course.credit = float(request.form.get('credit'))
+    course.semester = request.form.get('semester')
+
+    db.session.commit()
+    flash('课程更新成功！', 'success')
+    return redirect(url_for('admin_courses'))
+
+
+@app.route('/admin/courses/delete/<int:course_id>', methods=['POST'])
+@admin_required
+def admin_delete_course(course_id):
+    course = Course.query.get_or_404(course_id)
+    db.session.delete(course)
+    db.session.commit()
+    flash('课程已删除！', 'success')
+    return redirect(url_for('admin_courses'))
+
+
+# 管理员成绩管理页面
 @app.route('/admin/grades')
 @admin_required
 def admin_grades():
     page = request.args.get('page', 1, type=int)
-    grades = Grade.query.join(Student).join(Course).order_by(Student.name, Course.course_name).paginate(page=page,
-                                                                                                        per_page=15)
-    students = Student.query.all()
-    courses = Course.query.all()
 
-    return render_template('admin/grades.html', grades=grades, students=students, courses=courses)
+    # 获取所有成绩（关联学生和课程信息）
+    grades = Grade.query.join(Student).join(Course).order_by(
+        Student.class_name, Student.name, Course.course_name
+    ).paginate(page=page, per_page=15)
+
+    # 获取所有学生和课程用于添加成绩
+    students = Student.query.order_by(Student.class_name, Student.name).all()
+    courses = Course.query.order_by(Course.course_code).all()
+
+    return render_template('admin/grades.html',
+                           grades=grades,
+                           students=students,
+                           courses=courses)
 
 
+# 添加/更新成绩
 @app.route('/admin/grades/add', methods=['POST'])
 @admin_required
 def admin_add_grade():
@@ -418,31 +555,58 @@ def admin_add_grade():
     course_id = request.form.get('course_id')
     score = float(request.form.get('score'))
 
-    existing_grade = Grade.query.filter_by(student_id=student_id, course_id=course_id).first()
+    # 检查是否已有该学生的该课程成绩
+    existing_grade = Grade.query.filter_by(
+        student_id=student_id,
+        course_id=course_id
+    ).first()
+
     if existing_grade:
+        # 更新现有成绩
         existing_grade.score = score
         existing_grade.grade_level = calculate_grade_level(score)
+        flash('成绩已更新！', 'success')
     else:
+        # 添加新成绩
         new_grade = Grade(
             student_id=student_id,
             course_id=course_id,
             score=score,
-            grade_level=calculate_grade_level(score)
+            grade_level=calculate_grade_level(score),
+            exam_date=datetime.now().date()
         )
         db.session.add(new_grade)
+        flash('成绩添加成功！', 'success')
 
     db.session.commit()
-    flash('成绩添加/更新成功！', 'success')
     return redirect(url_for('admin_grades'))
 
 
+# 编辑成绩
+@app.route('/admin/grades/edit/<int:grade_id>', methods=['POST'])
+@admin_required
+def admin_edit_grade(grade_id):
+    grade = Grade.query.get_or_404(grade_id)
+    score = float(request.form.get('score'))
+
+    # 更新成绩和等级
+    grade.score = score
+    grade.grade_level = calculate_grade_level(score)
+    db.session.commit()
+
+    flash('成绩修改成功！', 'success')
+    return redirect(url_for('admin_grades'))
+
+
+# 删除成绩
 @app.route('/admin/grades/delete/<int:grade_id>', methods=['POST'])
 @admin_required
 def admin_delete_grade(grade_id):
     grade = Grade.query.get_or_404(grade_id)
     db.session.delete(grade)
     db.session.commit()
-    flash('成绩已删除', 'success')
+
+    flash('成绩已删除！', 'success')
     return redirect(url_for('admin_grades'))
 
 

@@ -39,7 +39,7 @@ class Student(db.Model):
     gender = db.Column(db.String(10))
     birth_date = db.Column(db.Date)
     class_name = db.Column(db.String(50))
-    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), unique=True)  # 添加unique约束
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), unique=True)
     grades = db.relationship('Grade', backref='student', lazy=True, cascade="all, delete-orphan")
 
 
@@ -86,6 +86,14 @@ def calculate_grade_level(score):
 
 def generate_student_id():
     return '2025' + ''.join(random.choices(string.digits, k=6))
+
+
+# 添加Jinja2过滤器
+@app.template_filter('average')
+def average_filter(list_data):
+    if not list_data:
+        return 0
+    return sum(list_data) / len(list_data)
 
 
 # 装饰器
@@ -139,7 +147,6 @@ with app.app_context():
         ]
         db.session.add_all(courses)
 
-    # 生成测试数据时确保user_id唯一
     if User.query.count() <= 1:
         students_data = [
             {'username': 'student1', 'email': 'student1@example.com', 'password': '123456',
@@ -157,7 +164,6 @@ with app.app_context():
         courses_list = Course.query.all()
 
         for data in students_data:
-            # 检查用户是否已存在
             existing_user = User.query.filter_by(username=data['username']).first()
             if not existing_user:
                 user = User(
@@ -168,7 +174,6 @@ with app.app_context():
                 db.session.add(user)
                 db.session.flush()
 
-                # 检查学生ID是否已存在
                 existing_student = Student.query.filter_by(student_id=data['student_id']).first()
                 if not existing_student:
                     student = Student(
@@ -181,7 +186,6 @@ with app.app_context():
                     db.session.add(student)
                     db.session.flush()
 
-                    # 添加成绩
                     for course in random.sample(courses_list, 4):
                         score = round(random.uniform(60, 98), 1)
                         grade = Grade(
@@ -201,7 +205,6 @@ def index():
     return redirect(url_for('login'))
 
 
-# 修改登录路由，统一跳转到成绩页面
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
@@ -217,12 +220,11 @@ def login():
             session['role'] = 'user'
             session['user_id'] = user.id
             session['expires_at'] = (datetime.now() + timedelta(hours=2)).timestamp()
-            return redirect(url_for('user_grades'))  # 统一跳转到成绩页面
+            return redirect(url_for('user_grades'))
 
         flash('用户名/密码错误或账号已禁用', 'error')
 
     return render_template('login.html')
-
 
 
 @app.route('/admin/login', methods=['GET', 'POST'])
@@ -273,38 +275,32 @@ def register():
     return render_template('register.html')
 
 
-# 用户功能 - 学生信息唯一性验证
 @app.route('/user/profile', methods=['GET', 'POST'])
 @login_required
 def user_profile():
-    user = User.query.get(session['user_id'])
+    user = db.session.get(User, session['user_id'])  # 使用新的get方法
     student = user.student
     classes = SchoolClass.query.all()
 
     if request.method == 'POST':
-        # 更新用户信息
         user.email = request.form.get('email')
         if request.form.get('password'):
             user.password = request.form.get('password')
 
         student_id = request.form.get('student_id')
 
-        # 检查学生ID是否已被其他用户绑定
         existing_student = Student.query.filter_by(student_id=student_id).first()
         if existing_student and existing_student.user_id != user.id:
             flash(f'学号 {student_id} 已被其他账户绑定！', 'error')
             return render_template('user/profile.html', user=user, student=student, classes=classes)
 
-        # 更新或创建学生信息
         if student:
-            # 更新现有学生信息
             student.name = request.form.get('name')
             student.gender = request.form.get('gender')
             student.class_name = request.form.get('class_name')
             if request.form.get('birth_date'):
                 student.birth_date = datetime.strptime(request.form.get('birth_date'), '%Y-%m-%d').date()
         else:
-            # 创建新的学生记录，确保唯一性
             new_student = Student(
                 student_id=student_id,
                 name=request.form.get('name'),
@@ -330,82 +326,32 @@ def user_profile():
 @app.route('/user/grades')
 @login_required
 def user_grades():
-    user = User.query.get(session['user_id'])
+    user = db.session.get(User, session['user_id'])  # 使用新的get方法
     student = user.student
     grades = []
     courses = Course.query.all()
 
     if student:
-        # 只显示当前学生的成绩
         grades = Grade.query.join(Course).filter(Grade.student_id == student.id).all()
 
     return render_template('user/grades.html', user=user, student=student, grades=grades, courses=courses)
 
 
-@app.route('/user/grades/add', methods=['POST'])
-@login_required
-def add_grade():
-    user = User.query.get(session['user_id'])
-    student = user.student
-
-    if not student:
-        flash('请先完善个人信息', 'error')
-        return redirect(url_for('user_profile'))
-
-    course_id = request.form.get('course_id')
-    score = float(request.form.get('score'))
-
-    # 检查是否已存在该课程成绩
-    existing_grade = Grade.query.filter_by(student_id=student.id, course_id=course_id).first()
-    if existing_grade:
-        existing_grade.score = score
-        existing_grade.grade_level = calculate_grade_level(score)
-    else:
-        new_grade = Grade(
-            student_id=student.id,
-            course_id=course_id,
-            score=score,
-            grade_level=calculate_grade_level(score)
-        )
-        db.session.add(new_grade)
-
-    db.session.commit()
-    flash('成绩添加/更新成功！', 'success')
-    return redirect(url_for('user_grades'))
-
-
-@app.route('/user/grades/delete/<int:grade_id>', methods=['POST'])
-@login_required
-def delete_grade(grade_id):
-    grade = Grade.query.get_or_404(grade_id)
-    user = User.query.get(session['user_id'])
-
-    # 确保只能删除自己的成绩
-    if grade.student.user_id != user.id:
-        flash('无权删除该成绩', 'error')
-        return redirect(url_for('user_grades'))
-
-    db.session.delete(grade)
-    db.session.commit()
-    flash('成绩已删除', 'success')
-    return redirect(url_for('user_grades'))
-
-
-@app.route('/user/courses')
+@app.route('/user/courses')  # 确保这个路由存在
 @login_required
 def user_courses():
-    user = User.query.get(session['user_id'])
+    user = db.session.get(User, session['user_id'])  # 使用新的get方法
     student = user.student
     courses = Course.query.all()
-
-    # 获取该学生已选课程（数据隔离）
     selected_courses = []
+    grades = []
+
     if student:
-        selected_grades = Grade.query.filter_by(student_id=student.id).all()
-        selected_courses = [grade.course_id for grade in selected_grades]
+        grades = Grade.query.filter_by(student_id=student.id).all()
+        selected_courses = [grade.course_id for grade in grades]
 
     return render_template('user/courses.html', user=user, student=student,
-                           courses=courses, selected_courses=selected_courses)
+                           courses=courses, selected_courses=selected_courses, grades=grades)
 
 
 @app.route('/logout')
@@ -415,7 +361,7 @@ def logout():
     return redirect(url_for('login'))
 
 
-# 管理员功能保持不变
+# 管理员路由
 @app.route('/admin/students')
 @admin_required
 def admin_students():
@@ -459,15 +405,45 @@ def admin_grades():
     page = request.args.get('page', 1, type=int)
     grades = Grade.query.join(Student).join(Course).order_by(Student.name, Course.course_name).paginate(page=page,
                                                                                                         per_page=15)
+    students = Student.query.all()
+    courses = Course.query.all()
 
-    return render_template('admin/grades.html', grades=grades)
+    return render_template('admin/grades.html', grades=grades, students=students, courses=courses)
 
-# 在app.py中添加Jinja2过滤器，用于计算平均分
-@app.template_filter('average')
-def average_filter(list):
-    if not list:
-        return 0
-    return sum(list) / len(list)
+
+@app.route('/admin/grades/add', methods=['POST'])
+@admin_required
+def admin_add_grade():
+    student_id = request.form.get('student_id')
+    course_id = request.form.get('course_id')
+    score = float(request.form.get('score'))
+
+    existing_grade = Grade.query.filter_by(student_id=student_id, course_id=course_id).first()
+    if existing_grade:
+        existing_grade.score = score
+        existing_grade.grade_level = calculate_grade_level(score)
+    else:
+        new_grade = Grade(
+            student_id=student_id,
+            course_id=course_id,
+            score=score,
+            grade_level=calculate_grade_level(score)
+        )
+        db.session.add(new_grade)
+
+    db.session.commit()
+    flash('成绩添加/更新成功！', 'success')
+    return redirect(url_for('admin_grades'))
+
+
+@app.route('/admin/grades/delete/<int:grade_id>', methods=['POST'])
+@admin_required
+def admin_delete_grade(grade_id):
+    grade = Grade.query.get_or_404(grade_id)
+    db.session.delete(grade)
+    db.session.commit()
+    flash('成绩已删除', 'success')
+    return redirect(url_for('admin_grades'))
 
 
 if __name__ == '__main__':

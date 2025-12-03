@@ -4,6 +4,7 @@ from flask_sqlalchemy import SQLAlchemy
 from functools import wraps
 import random
 import string
+from sqlalchemy import text
 
 app = Flask(__name__)
 app.secret_key = 'score_system_key_2025'
@@ -39,7 +40,8 @@ class Student(db.Model):
     gender = db.Column(db.String(10))
     birth_date = db.Column(db.Date)
     class_name = db.Column(db.String(50))
-    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), unique=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), unique=True, nullable=True)
+    is_bound = db.Column(db.Boolean, default=False)
     grades = db.relationship('Grade', backref='student', lazy=True, cascade="all, delete-orphan")
 
 
@@ -91,9 +93,17 @@ def generate_student_id():
 # 添加Jinja2过滤器
 @app.template_filter('average')
 def average_filter(list_data):
-    if not list_data:
+    # 将生成器转换为列表
+    data_list = list(list_data)
+    if not data_list:
         return 0
-    return sum(list_data) / len(list_data)
+    return sum(data_list) / len(data_list)
+
+
+# 添加辅助过滤器
+@app.template_filter('count')
+def count_filter(generator):
+    return len(list(generator))
 
 
 # 装饰器
@@ -121,10 +131,57 @@ def admin_required(f):
 with app.app_context():
     db.create_all()
 
+    # 确保is_bound字段存在
+    try:
+        result = db.session.execute(text("PRAGMA table_info(student)")).fetchall()
+        columns = [col[1] for col in result]
+
+        if 'is_bound' not in columns:
+            db.session.execute(text("ALTER TABLE student ADD COLUMN is_bound BOOLEAN DEFAULT 0"))
+            db.session.commit()
+
+        # 确保user_id字段允许NULL
+        if 'user_id' in columns:
+            db.session.execute(text("PRAGMA foreign_keys=off"))
+            db.session.commit()
+            db.session.execute(text("ALTER TABLE student RENAME TO student_old"))
+            db.session.execute(text("""
+                CREATE TABLE student (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    student_id VARCHAR(20) UNIQUE NOT NULL,
+                    name VARCHAR(50) NOT NULL,
+                    gender VARCHAR(10),
+                    birth_date DATE,
+                    class_name VARCHAR(50),
+                    user_id INTEGER,
+                    is_bound BOOLEAN DEFAULT 0,
+                    FOREIGN KEY (user_id) REFERENCES user (id)
+                )
+            """))
+            db.session.execute(text("INSERT INTO student SELECT * FROM student_old"))
+            db.session.execute(text("DROP TABLE student_old"))
+            db.session.execute(text("PRAGMA foreign_keys=on"))
+            db.session.commit()
+    except Exception as e:
+        print(f"数据库结构更新错误: {e}")
+        db.session.rollback()
+
+    # 更新现有学生的绑定状态
+    try:
+        students = Student.query.all()
+        for student in students:
+            if student.user_id:
+                student.is_bound = True
+        db.session.commit()
+    except:
+        pass
+
+    # 创建管理员账号
     if not Admin.query.filter_by(username='admin').first():
         admin = Admin(username='admin', email='admin@example.com', password='admin123', is_super=True)
         db.session.add(admin)
 
+    # 创建班级数据
     if not SchoolClass.query.first():
         classes = [
             SchoolClass(class_name='计算机科学与技术1班', major='计算机科学与技术', grade='2025级'),
@@ -135,6 +192,7 @@ with app.app_context():
         ]
         db.session.add_all(classes)
 
+    # 创建课程数据
     if not Course.query.first():
         courses = [
             Course(course_code='MATH101', course_name='高等数学', credit=4.0, semester='2025-1'),
@@ -147,6 +205,7 @@ with app.app_context():
         ]
         db.session.add_all(courses)
 
+    # 创建测试学生数据
     if User.query.count() <= 1:
         students_data = [
             {'username': 'student1', 'email': 'student1@example.com', 'password': '123456',
@@ -181,7 +240,8 @@ with app.app_context():
                         name=data['name'],
                         gender=data['gender'],
                         class_name=data['class_name'],
-                        user_id=user.id
+                        user_id=user.id,
+                        is_bound=True
                     )
                     db.session.add(student)
                     db.session.flush()
@@ -249,99 +309,120 @@ def admin_login():
 @app.route('/register', methods=['GET', 'POST'])
 def register():
     if request.method == 'POST':
-        # 获取表单数据
         username = request.form.get('username')
         email = request.form.get('email')
         password = request.form.get('password')
         confirm_password = request.form.get('confirm_password')
+        student_id = request.form.get('student_id')
 
-        # 表单验证
         if not username or not email or not password or not confirm_password:
             flash('所有字段都是必填项！', 'error')
-            return render_template('register.html', username=username, email=email)
+            return render_template('register.html', username=username, email=email, student_id=student_id)
 
         if password != confirm_password:
             flash('两次输入的密码不一致！', 'error')
-            return render_template('register.html', username=username, email=email)
+            return render_template('register.html', username=username, email=email, student_id=student_id)
 
-        # 检查用户名是否已存在
         if User.query.filter_by(username=username).first():
             flash('用户名已被注册，请选择其他用户名！', 'error')
-            return render_template('register.html', email=email)
+            return render_template('register.html', email=email, student_id=student_id)
 
-        # 检查邮箱是否已存在
         if User.query.filter_by(email=email).first():
             flash('该邮箱已被注册，请使用其他邮箱！', 'error')
-            return render_template('register.html', username=username)
+            return render_template('register.html', username=username, student_id=student_id)
 
-        # 创建新用户
+        student = None
+        if student_id:
+            student = Student.query.filter_by(student_id=student_id).first()
+            if student:
+                if student.is_bound:
+                    flash('该学号已绑定其他账号！', 'error')
+                    return render_template('register.html', username=username, email=email)
+
         try:
             new_user = User(
                 username=username,
                 email=email,
-                password=password,  # 注意：实际项目中应该加密存储密码
+                password=password,
                 is_active=True
             )
             db.session.add(new_user)
+            db.session.flush()
+
+            if student:
+                student.user_id = new_user.id
+                student.is_bound = True
+
             db.session.commit()
 
-            # 注册成功，跳转到登录页
             flash('注册成功！请使用您的账号登录。', 'success')
             return redirect(url_for('login'))
 
         except Exception as e:
             db.session.rollback()
             flash(f'注册失败：{str(e)}', 'error')
-            return render_template('register.html', username=username, email=email)
+            return render_template('register.html', username=username, email=email, student_id=student_id)
 
-    # GET请求，显示注册表单
     return render_template('register.html')
 
 
 @app.route('/user/profile', methods=['GET', 'POST'])
 @login_required
 def user_profile():
-    user = db.session.get(User, session['user_id'])  # 使用新的get方法
+    user = db.session.get(User, session['user_id'])
     student = user.student
     classes = SchoolClass.query.all()
 
     if request.method == 'POST':
+        # 处理个人信息更新
         user.email = request.form.get('email')
         if request.form.get('password'):
             user.password = request.form.get('password')
 
-        student_id = request.form.get('student_id')
+        # 处理学号绑定
+        if 'student_id' in request.form and request.form.get('student_id') and not student:
+            student_id = request.form.get('student_id')
+            existing_student = Student.query.filter_by(student_id=student_id).first()
 
-        existing_student = Student.query.filter_by(student_id=student_id).first()
-        if existing_student and existing_student.user_id != user.id:
-            flash(f'学号 {student_id} 已被其他账户绑定！', 'error')
-            return render_template('user/profile.html', user=user, student=student, classes=classes)
-
-        if student:
-            student.name = request.form.get('name')
-            student.gender = request.form.get('gender')
-            student.class_name = request.form.get('class_name')
+            if existing_student:
+                if existing_student.is_bound:
+                    flash(f'学号 {student_id} 已被其他账户绑定！', 'error')
+                else:
+                    existing_student.user_id = user.id
+                    existing_student.is_bound = True
+                    student = existing_student
+                    flash(f'成功绑定学号 {student_id}！', 'success')
+            else:
+                # 创建新学生记录
+                new_student = Student(
+                    student_id=student_id,
+                    name=request.form.get('name', user.username),
+                    gender=request.form.get('gender'),
+                    class_name=request.form.get('class_name'),
+                    birth_date=datetime.strptime(request.form.get('birth_date'), '%Y-%m-%d').date() if request.form.get(
+                        'birth_date') else None,
+                    user_id=user.id,
+                    is_bound=True
+                )
+                db.session.add(new_student)
+                student = new_student
+                flash('学生信息创建并绑定成功！', 'success')
+        elif student:
+            # 更新学生信息
+            student.name = request.form.get('name', student.name)
+            student.gender = request.form.get('gender', student.gender)
+            student.class_name = request.form.get('class_name', student.class_name)
             if request.form.get('birth_date'):
                 student.birth_date = datetime.strptime(request.form.get('birth_date'), '%Y-%m-%d').date()
-        else:
-            new_student = Student(
-                student_id=student_id,
-                name=request.form.get('name'),
-                gender=request.form.get('gender'),
-                class_name=request.form.get('class_name'),
-                birth_date=datetime.strptime(request.form.get('birth_date'), '%Y-%m-%d').date() if request.form.get(
-                    'birth_date') else None,
-                user_id=user.id
-            )
-            db.session.add(new_student)
 
         try:
             db.session.commit()
             flash('个人信息更新成功！', 'success')
-            return redirect(url_for('user_grades'))
         except Exception as e:
             db.session.rollback()
-            flash(f'绑定失败：{str(e)}', 'error')
+            flash(f'操作失败：{str(e)}', 'error')
+
+        return redirect(url_for('user_profile'))
 
     return render_template('user/profile.html', user=user, student=student, classes=classes)
 
@@ -349,7 +430,7 @@ def user_profile():
 @app.route('/user/grades')
 @login_required
 def user_grades():
-    user = db.session.get(User, session['user_id'])  # 使用新的get方法
+    user = db.session.get(User, session['user_id'])
     student = user.student
     grades = []
     courses = Course.query.all()
@@ -357,13 +438,36 @@ def user_grades():
     if student:
         grades = Grade.query.join(Course).filter(Grade.student_id == student.id).all()
 
-    return render_template('user/grades.html', user=user, student=student, grades=grades, courses=courses)
+        # 计算统计数据
+        if grades:
+            scores = [grade.score for grade in grades]
+            average_score = sum(scores) / len(scores)
+            excellent_count = len([g for g in grades if g.grade_level == '优'])
+            pass_count = len([g for g in grades if g.grade_level != '不及格'])
+            pass_rate = (pass_count / len(grades)) * 100 if grades else 0
+        else:
+            average_score = 0
+            excellent_count = 0
+            pass_rate = 0
+    else:
+        average_score = 0
+        excellent_count = 0
+        pass_rate = 0
+
+    return render_template('user/grades.html',
+                           user=user,
+                           student=student,
+                           grades=grades,
+                           courses=courses,
+                           average_score=average_score,
+                           excellent_count=excellent_count,
+                           pass_rate=pass_rate)
 
 
-@app.route('/user/courses')  # 确保这个路由存在
+@app.route('/user/courses')
 @login_required
 def user_courses():
-    user = db.session.get(User, session['user_id'])  # 使用新的get方法
+    user = db.session.get(User, session['user_id'])
     student = user.student
     courses = Course.query.all()
     selected_courses = []
@@ -391,13 +495,12 @@ def admin_students():
     page = request.args.get('page', 1, type=int)
     search = request.args.get('search', '')
 
-    query = Student.query.join(User)
+    query = Student.query
     if search:
         query = query.filter(
             db.or_(
                 Student.name.contains(search),
-                Student.student_id.contains(search),
-                User.username.contains(search)
+                Student.student_id.contains(search)
             )
         )
 
@@ -406,7 +509,6 @@ def admin_students():
     return render_template('admin/students.html', students=students, search=search)
 
 
-# 在admin_required装饰器之后添加以下路由
 @app.route('/admin/students/add', methods=['POST'])
 @admin_required
 def admin_add_student():
@@ -414,45 +516,29 @@ def admin_add_student():
     name = request.form.get('name')
     gender = request.form.get('gender')
     class_name = request.form.get('class_name')
+    birth_date = request.form.get('birth_date')
 
-    # 检查学号是否已存在
     existing_student = Student.query.filter_by(student_id=student_id).first()
     if existing_student:
         flash('学号已存在！', 'error')
         return redirect(url_for('admin_students'))
-
-    # 创建用户账号（默认密码123456）
-    username = f"student_{student_id[-4:]}"
-    email = f"{student_id}@school.com"
-
-    # 确保用户名唯一
-    if User.query.filter_by(username=username).first():
-        username = f"student_{student_id}"
-
-    # 创建用户和学生记录
-    new_user = User(
-        username=username,
-        email=email,
-        password='123456'  # 默认密码
-    )
-    db.session.add(new_user)
-    db.session.flush()  # 获取user.id但不提交
 
     new_student = Student(
         student_id=student_id,
         name=name,
         gender=gender,
         class_name=class_name,
-        user_id=new_user.id
+        birth_date=datetime.strptime(birth_date, '%Y-%m-%d').date() if birth_date else None,
+        user_id=None,
+        is_bound=False
     )
     db.session.add(new_student)
     db.session.commit()
 
-    flash(f'学生添加成功！账号：{username}，默认密码：123456', 'success')
+    flash(f'学生 {name} 添加成功！等待学生注册绑定账号。', 'success')
     return redirect(url_for('admin_students'))
 
 
-# 同时添加编辑和删除学生的路由
 @app.route('/admin/students/edit/<int:student_id>', methods=['POST'])
 @admin_required
 def admin_edit_student(student_id):
@@ -474,13 +560,21 @@ def admin_edit_student(student_id):
 def admin_delete_student(student_id):
     student = Student.query.get_or_404(student_id)
 
-    # 删除关联的用户账号
-    if student.user:
-        db.session.delete(student.user)
+    try:
+        if student.user_id:
+            student.user_id = None
+            student.is_bound = False
+            db.session.commit()
+            flash('学生已解除账号绑定！', 'success')
+        else:
+            Grade.query.filter_by(student_id=student.id).delete()
+            db.session.delete(student)
+            db.session.commit()
+            flash('学生信息已删除！', 'success')
+    except Exception as e:
+        db.session.rollback()
+        flash(f'操作失败：{str(e)}', 'error')
 
-    db.session.delete(student)
-    db.session.commit()
-    flash('学生信息已删除！', 'success')
     return redirect(url_for('admin_students'))
 
 
@@ -500,7 +594,6 @@ def admin_courses():
     return render_template('admin/courses.html', courses=courses)
 
 
-# 课程管理路由
 @app.route('/admin/courses/add', methods=['POST'])
 @admin_required
 def admin_add_course():
@@ -543,24 +636,22 @@ def admin_edit_course(course_id):
 @admin_required
 def admin_delete_course(course_id):
     course = Course.query.get_or_404(course_id)
+    Grade.query.filter_by(course_id=course.id).delete()
     db.session.delete(course)
     db.session.commit()
     flash('课程已删除！', 'success')
     return redirect(url_for('admin_courses'))
 
 
-# 管理员成绩管理页面
 @app.route('/admin/grades')
 @admin_required
 def admin_grades():
     page = request.args.get('page', 1, type=int)
 
-    # 获取所有成绩（关联学生和课程信息）
     grades = Grade.query.join(Student).join(Course).order_by(
         Student.class_name, Student.name, Course.course_name
     ).paginate(page=page, per_page=15)
 
-    # 获取所有学生和课程用于添加成绩
     students = Student.query.order_by(Student.class_name, Student.name).all()
     courses = Course.query.order_by(Course.course_code).all()
 
@@ -570,7 +661,6 @@ def admin_grades():
                            courses=courses)
 
 
-# 添加/更新成绩
 @app.route('/admin/grades/add', methods=['POST'])
 @admin_required
 def admin_add_grade():
@@ -578,19 +668,16 @@ def admin_add_grade():
     course_id = request.form.get('course_id')
     score = float(request.form.get('score'))
 
-    # 检查是否已有该学生的该课程成绩
     existing_grade = Grade.query.filter_by(
         student_id=student_id,
         course_id=course_id
     ).first()
 
     if existing_grade:
-        # 更新现有成绩
         existing_grade.score = score
         existing_grade.grade_level = calculate_grade_level(score)
         flash('成绩已更新！', 'success')
     else:
-        # 添加新成绩
         new_grade = Grade(
             student_id=student_id,
             course_id=course_id,
@@ -605,14 +692,12 @@ def admin_add_grade():
     return redirect(url_for('admin_grades'))
 
 
-# 编辑成绩
 @app.route('/admin/grades/edit/<int:grade_id>', methods=['POST'])
 @admin_required
 def admin_edit_grade(grade_id):
     grade = Grade.query.get_or_404(grade_id)
     score = float(request.form.get('score'))
 
-    # 更新成绩和等级
     grade.score = score
     grade.grade_level = calculate_grade_level(score)
     db.session.commit()
@@ -621,7 +706,6 @@ def admin_edit_grade(grade_id):
     return redirect(url_for('admin_grades'))
 
 
-# 删除成绩
 @app.route('/admin/grades/delete/<int:grade_id>', methods=['POST'])
 @admin_required
 def admin_delete_grade(grade_id):

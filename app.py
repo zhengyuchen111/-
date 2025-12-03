@@ -249,29 +249,52 @@ def admin_login():
 @app.route('/register', methods=['GET', 'POST'])
 def register():
     if request.method == 'POST':
+        # 获取表单数据
         username = request.form.get('username')
         email = request.form.get('email')
         password = request.form.get('password')
         confirm_password = request.form.get('confirm_password')
 
-        if password != confirm_password:
-            flash('两次密码不一致', 'error')
+        # 表单验证
+        if not username or not email or not password or not confirm_password:
+            flash('所有字段都是必填项！', 'error')
             return render_template('register.html', username=username, email=email)
 
+        if password != confirm_password:
+            flash('两次输入的密码不一致！', 'error')
+            return render_template('register.html', username=username, email=email)
+
+        # 检查用户名是否已存在
         if User.query.filter_by(username=username).first():
-            flash('用户名已存在', 'error')
+            flash('用户名已被注册，请选择其他用户名！', 'error')
             return render_template('register.html', email=email)
 
+        # 检查邮箱是否已存在
         if User.query.filter_by(email=email).first():
-            flash('邮箱已被注册', 'error')
+            flash('该邮箱已被注册，请使用其他邮箱！', 'error')
             return render_template('register.html', username=username)
 
-        new_user = User(username=username, email=email, password=password)
-        db.session.add(new_user)
-        db.session.commit()
-        flash('注册成功，请登录', 'success')
-        return redirect(url_for('login'))
+        # 创建新用户
+        try:
+            new_user = User(
+                username=username,
+                email=email,
+                password=password,  # 注意：实际项目中应该加密存储密码
+                is_active=True
+            )
+            db.session.add(new_user)
+            db.session.commit()
 
+            # 注册成功，跳转到登录页
+            flash('注册成功！请使用您的账号登录。', 'success')
+            return redirect(url_for('login'))
+
+        except Exception as e:
+            db.session.rollback()
+            flash(f'注册失败：{str(e)}', 'error')
+            return render_template('register.html', username=username, email=email)
+
+    # GET请求，显示注册表单
     return render_template('register.html')
 
 

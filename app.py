@@ -315,8 +315,8 @@ def register():
         confirm_password = request.form.get('confirm_password')
         student_id = request.form.get('student_id')
 
-        if not username or not email or not password or not confirm_password:
-            flash('所有字段都是必填项！', 'error')
+        if not username or not password or not confirm_password:
+            flash('用户名和密码是必填项！', 'error')
             return render_template('register.html', username=username, email=email, student_id=student_id)
 
         if password != confirm_password:
@@ -327,9 +327,14 @@ def register():
             flash('用户名已被注册，请选择其他用户名！', 'error')
             return render_template('register.html', email=email, student_id=student_id)
 
-        if User.query.filter_by(email=email).first():
-            flash('该邮箱已被注册，请使用其他邮箱！', 'error')
-            return render_template('register.html', username=username, student_id=student_id)
+        # 邮箱可选，如果提供则检查唯一性
+        if email:
+            if User.query.filter_by(email=email).first():
+                flash('该邮箱已被注册，请使用其他邮箱！', 'error')
+                return render_template('register.html', username=username, student_id=student_id)
+        else:
+            # 如果没有提供邮箱，使用默认邮箱格式
+            email = f"{username}@example.com"
 
         student = None
         if student_id:
@@ -374,50 +379,87 @@ def user_profile():
     classes = SchoolClass.query.all()
 
     if request.method == 'POST':
-        # 处理个人信息更新
-        user.email = request.form.get('email')
-        if request.form.get('password'):
-            user.password = request.form.get('password')
-
-        # 处理学号绑定
-        if 'student_id' in request.form and request.form.get('student_id') and not student:
-            student_id = request.form.get('student_id')
-            existing_student = Student.query.filter_by(student_id=student_id).first()
-
-            if existing_student:
-                if existing_student.is_bound:
-                    flash(f'学号 {student_id} 已被其他账户绑定！', 'error')
-                else:
-                    existing_student.user_id = user.id
-                    existing_student.is_bound = True
-                    student = existing_student
-                    flash(f'成功绑定学号 {student_id}！', 'success')
-            else:
-                # 创建新学生记录
-                new_student = Student(
-                    student_id=student_id,
-                    name=request.form.get('name', user.username),
-                    gender=request.form.get('gender'),
-                    class_name=request.form.get('class_name'),
-                    birth_date=datetime.strptime(request.form.get('birth_date'), '%Y-%m-%d').date() if request.form.get(
-                        'birth_date') else None,
-                    user_id=user.id,
-                    is_bound=True
-                )
-                db.session.add(new_student)
-                student = new_student
-                flash('学生信息创建并绑定成功！', 'success')
-        elif student:
-            # 更新学生信息
-            student.name = request.form.get('name', student.name)
-            student.gender = request.form.get('gender', student.gender)
-            student.class_name = request.form.get('class_name', student.class_name)
-            if request.form.get('birth_date'):
-                student.birth_date = datetime.strptime(request.form.get('birth_date'), '%Y-%m-%d').date()
-
         try:
-            db.session.commit()
-            flash('个人信息更新成功！', 'success')
+            # 处理解除绑定
+            if 'unbind_student' in request.form and student:
+                student.user_id = None
+                student.is_bound = False
+                db.session.commit()
+                flash('已成功解除学生绑定！', 'success')
+                return redirect(url_for('user_profile'))
+
+            # 处理学号绑定（单独的表单提交）
+            elif 'bind_student' in request.form:
+                student_id = request.form.get('student_id', '').strip()
+
+                if not student_id:
+                    flash('学号不能为空！', 'error')
+                    return redirect(url_for('user_profile'))
+
+                # 使用no_autoflush避免自动刷新导致的错误
+                with db.session.no_autoflush:
+                    existing_student = Student.query.filter_by(student_id=student_id).first()
+
+                if existing_student:
+                    if existing_student.is_bound:
+                        flash(f'学号 {student_id} 已被其他账户绑定！', 'error')
+                    else:
+                        existing_student.user_id = user.id
+                        existing_student.is_bound = True
+                        student = existing_student
+                        flash(f'成功绑定学号 {student_id}！', 'success')
+                else:
+                    # 创建新学生记录
+                    name = request.form.get('name', '').strip() or user.username
+                    class_name = request.form.get('class_name', '').strip()
+
+                    if not class_name:
+                        flash('班级信息不能为空！', 'error')
+                        return redirect(url_for('user_profile'))
+
+                    # 创建新学生
+                    new_student = Student(
+                        student_id=student_id,
+                        name=name,
+                        gender=request.form.get('gender', ''),
+                        class_name=class_name,
+                        birth_date=datetime.strptime(request.form.get('birth_date'), '%Y-%m-%d').date()
+                        if request.form.get('birth_date') else None,
+                        user_id=user.id,
+                        is_bound=True
+                    )
+                    db.session.add(new_student)
+                    student = new_student
+                    flash('学生信息创建并绑定成功！', 'success')
+
+                db.session.commit()
+                return redirect(url_for('user_profile'))
+
+            # 处理个人信息更新
+            else:
+                # 更新密码（如果提供）
+                new_password = request.form.get('password', '').strip()
+                if new_password:
+                    user.password = new_password
+
+                # 更新学生信息（如果已绑定）
+                if student:
+                    student.name = request.form.get('name', '').strip() or student.name
+                    student.gender = request.form.get('gender', student.gender)
+                    student.class_name = request.form.get('class_name', student.class_name)
+
+                    birth_date_str = request.form.get('birth_date')
+                    if birth_date_str:
+                        try:
+                            student.birth_date = datetime.strptime(birth_date_str, '%Y-%m-%d').date()
+                        except ValueError:
+                            flash('出生日期格式不正确！', 'error')
+                            return redirect(url_for('user_profile'))
+
+                # 提交更改
+                db.session.commit()
+                flash('个人信息更新成功！', 'success')
+
         except Exception as e:
             db.session.rollback()
             flash(f'操作失败：{str(e)}', 'error')
@@ -535,7 +577,7 @@ def admin_add_student():
     db.session.add(new_student)
     db.session.commit()
 
-    flash(f'学生 {name} 添加成功！等待学生注册绑定账号。', 'success')
+    flash(f'学生 {name} 添加成功！', 'success')
     return redirect(url_for('admin_students'))
 
 

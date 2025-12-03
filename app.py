@@ -39,7 +39,7 @@ class Student(db.Model):
     gender = db.Column(db.String(10))
     birth_date = db.Column(db.Date)
     class_name = db.Column(db.String(50))
-    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), unique=True)  # 添加unique约束
     grades = db.relationship('Grade', backref='student', lazy=True, cascade="all, delete-orphan")
 
 
@@ -139,50 +139,58 @@ with app.app_context():
         ]
         db.session.add_all(courses)
 
+    # 生成测试数据时确保user_id唯一
     if User.query.count() <= 1:
         students_data = [
             {'username': 'student1', 'email': 'student1@example.com', 'password': '123456',
-             'name': '张三', 'gender': '男', 'class_name': '计算机科学与技术1班'},
+             'name': '张三', 'gender': '男', 'class_name': '计算机科学与技术1班', 'student_id': '2025001001'},
             {'username': 'student2', 'email': 'student2@example.com', 'password': '123456',
-             'name': '李四', 'gender': '女', 'class_name': '计算机科学与技术1班'},
+             'name': '李四', 'gender': '女', 'class_name': '计算机科学与技术1班', 'student_id': '2025001002'},
             {'username': 'student3', 'email': 'student3@example.com', 'password': '123456',
-             'name': '王五', 'gender': '男', 'class_name': '软件工程1班'},
+             'name': '王五', 'gender': '男', 'class_name': '软件工程1班', 'student_id': '2025002001'},
             {'username': 'student4', 'email': 'student4@example.com', 'password': '123456',
-             'name': '赵六', 'gender': '女', 'class_name': '人工智能1班'},
+             'name': '赵六', 'gender': '女', 'class_name': '人工智能1班', 'student_id': '2025003001'},
             {'username': 'student5', 'email': 'student5@example.com', 'password': '123456',
-             'name': '钱七', 'gender': '男', 'class_name': '信息安全1班'}
+             'name': '钱七', 'gender': '男', 'class_name': '信息安全1班', 'student_id': '2025004001'}
         ]
 
         courses_list = Course.query.all()
 
         for data in students_data:
-            user = User(
-                username=data['username'],
-                email=data['email'],
-                password=data['password']
-            )
-            db.session.add(user)
-            db.session.flush()
-
-            student = Student(
-                student_id=generate_student_id(),
-                name=data['name'],
-                gender=data['gender'],
-                class_name=data['class_name'],
-                user_id=user.id
-            )
-            db.session.add(student)
-            db.session.flush()
-
-            for course in random.sample(courses_list, 4):
-                score = round(random.uniform(60, 98), 1)
-                grade = Grade(
-                    student_id=student.id,
-                    course_id=course.id,
-                    score=score,
-                    grade_level=calculate_grade_level(score)
+            # 检查用户是否已存在
+            existing_user = User.query.filter_by(username=data['username']).first()
+            if not existing_user:
+                user = User(
+                    username=data['username'],
+                    email=data['email'],
+                    password=data['password']
                 )
-                db.session.add(grade)
+                db.session.add(user)
+                db.session.flush()
+
+                # 检查学生ID是否已存在
+                existing_student = Student.query.filter_by(student_id=data['student_id']).first()
+                if not existing_student:
+                    student = Student(
+                        student_id=data['student_id'],
+                        name=data['name'],
+                        gender=data['gender'],
+                        class_name=data['class_name'],
+                        user_id=user.id
+                    )
+                    db.session.add(student)
+                    db.session.flush()
+
+                    # 添加成绩
+                    for course in random.sample(courses_list, 4):
+                        score = round(random.uniform(60, 98), 1)
+                        grade = Grade(
+                            student_id=student.id,
+                            course_id=course.id,
+                            score=score,
+                            grade_level=calculate_grade_level(score)
+                        )
+                        db.session.add(grade)
 
     db.session.commit()
 
@@ -208,7 +216,7 @@ def login():
             session['role'] = 'user'
             session['user_id'] = user.id
             session['expires_at'] = (datetime.now() + timedelta(hours=2)).timestamp()
-            return redirect(url_for('user_profile'))  # 登录后直接进入个人信息页面
+            return redirect(url_for('user_profile'))
 
         flash('用户名/密码错误或账号已禁用', 'error')
 
@@ -263,13 +271,13 @@ def register():
     return render_template('register.html')
 
 
-# 用户功能 - 移除仪表盘，优化导航
+# 用户功能 - 学生信息唯一性验证
 @app.route('/user/profile', methods=['GET', 'POST'])
 @login_required
 def user_profile():
     user = User.query.get(session['user_id'])
     student = user.student
-    classes = SchoolClass.query.all()  # 获取所有班级供选择
+    classes = SchoolClass.query.all()
 
     if request.method == 'POST':
         # 更新用户信息
@@ -277,18 +285,26 @@ def user_profile():
         if request.form.get('password'):
             user.password = request.form.get('password')
 
+        student_id = request.form.get('student_id')
+
+        # 检查学生ID是否已被其他用户绑定
+        existing_student = Student.query.filter_by(student_id=student_id).first()
+        if existing_student and existing_student.user_id != user.id:
+            flash(f'学号 {student_id} 已被其他账户绑定！', 'error')
+            return render_template('user/profile.html', user=user, student=student, classes=classes)
+
         # 更新或创建学生信息
         if student:
+            # 更新现有学生信息
             student.name = request.form.get('name')
             student.gender = request.form.get('gender')
-            student.student_id = request.form.get('student_id')
             student.class_name = request.form.get('class_name')
             if request.form.get('birth_date'):
                 student.birth_date = datetime.strptime(request.form.get('birth_date'), '%Y-%m-%d').date()
         else:
-            # 创建新的学生记录关联到当前用户
+            # 创建新的学生记录，确保唯一性
             new_student = Student(
-                student_id=request.form.get('student_id'),
+                student_id=student_id,
                 name=request.form.get('name'),
                 gender=request.form.get('gender'),
                 class_name=request.form.get('class_name'),
@@ -298,9 +314,13 @@ def user_profile():
             )
             db.session.add(new_student)
 
-        db.session.commit()
-        flash('个人信息更新成功！', 'success')
-        return redirect(url_for('user_grades'))  # 更新后跳转到成绩页面
+        try:
+            db.session.commit()
+            flash('个人信息更新成功！', 'success')
+            return redirect(url_for('user_grades'))
+        except Exception as e:
+            db.session.rollback()
+            flash(f'绑定失败：{str(e)}', 'error')
 
     return render_template('user/profile.html', user=user, student=student, classes=classes)
 
@@ -314,6 +334,7 @@ def user_grades():
     courses = Course.query.all()
 
     if student:
+        # 只显示当前学生的成绩
         grades = Grade.query.join(Course).filter(Grade.student_id == student.id).all()
 
     return render_template('user/grades.html', user=user, student=student, grades=grades, courses=courses)
@@ -357,6 +378,7 @@ def delete_grade(grade_id):
     grade = Grade.query.get_or_404(grade_id)
     user = User.query.get(session['user_id'])
 
+    # 确保只能删除自己的成绩
     if grade.student.user_id != user.id:
         flash('无权删除该成绩', 'error')
         return redirect(url_for('user_grades'))
@@ -374,7 +396,7 @@ def user_courses():
     student = user.student
     courses = Course.query.all()
 
-    # 获取该学生已选课程
+    # 获取该学生已选课程（数据隔离）
     selected_courses = []
     if student:
         selected_grades = Grade.query.filter_by(student_id=student.id).all()

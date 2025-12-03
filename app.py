@@ -201,6 +201,7 @@ def index():
     return redirect(url_for('login'))
 
 
+# 修改登录路由，统一跳转到成绩页面
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
@@ -216,11 +217,12 @@ def login():
             session['role'] = 'user'
             session['user_id'] = user.id
             session['expires_at'] = (datetime.now() + timedelta(hours=2)).timestamp()
-            return redirect(url_for('user_profile'))
+            return redirect(url_for('user_grades'))  # 统一跳转到成绩页面
 
         flash('用户名/密码错误或账号已禁用', 'error')
 
     return render_template('login.html')
+
 
 
 @app.route('/admin/login', methods=['GET', 'POST'])
@@ -459,6 +461,13 @@ def admin_grades():
                                                                                                         per_page=15)
 
     return render_template('admin/grades.html', grades=grades)
+
+# 在app.py中添加Jinja2过滤器，用于计算平均分
+@app.template_filter('average')
+def average_filter(list):
+    if not list:
+        return 0
+    return sum(list) / len(list)
 
 
 if __name__ == '__main__':

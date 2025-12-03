@@ -2,7 +2,8 @@ from flask import Flask, render_template, request, redirect, url_for, session, f
 from datetime import datetime, timedelta
 from flask_sqlalchemy import SQLAlchemy
 from functools import wraps
-import re
+import random
+import string
 
 app = Flask(__name__)
 app.secret_key = 'score_system_key_2025'
@@ -11,7 +12,7 @@ app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
 
 
-# 数据库模型定义（保持不变）
+# 数据库模型定义
 class User(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(50), unique=True, nullable=False)
@@ -42,6 +43,15 @@ class Student(db.Model):
     grades = db.relationship('Grade', backref='student', lazy=True, cascade="all, delete-orphan")
 
 
+# 修改类名为SchoolClass，避免与Python关键字冲突
+class SchoolClass(db.Model):
+    __tablename__ = 'classes'  # 指定表名，避免使用SQL关键字
+    id = db.Column(db.Integer, primary_key=True)
+    class_name = db.Column(db.String(50), unique=True, nullable=False)
+    major = db.Column(db.String(50))
+    grade = db.Column(db.String(20))
+
+
 class Course(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     course_code = db.Column(db.String(20), unique=True, nullable=False)
@@ -61,25 +71,6 @@ class Grade(db.Model):
     __table_args__ = (db.UniqueConstraint('student_id', 'course_id', name='unique_student_course'),)
 
 
-# 初始化数据库
-with app.app_context():
-    db.create_all()
-    if not Admin.query.filter_by(username='admin').first():
-        admin = Admin(username='admin', email='admin@example.com', password='admin123', is_super=True)
-        db.session.add(admin)
-        db.session.commit()
-    if not Course.query.first():
-        courses = [
-            Course(course_code='MATH101', course_name='高等数学', credit=4.0, semester='2025-1'),
-            Course(course_code='ENG101', course_name='大学英语', credit=3.0, semester='2025-1'),
-            Course(course_code='PHY101', course_name='大学物理', credit=3.5, semester='2025-1'),
-            Course(course_code='PROG101', course_name='程序设计基础', credit=3.0, semester='2025-1'),
-            Course(course_code='POL101', course_name='思想政治', credit=2.0, semester='2025-1')
-        ]
-        db.session.add_all(courses)
-        db.session.commit()
-
-
 # 辅助函数
 def calculate_grade_level(score):
     if score >= 90:
@@ -92,6 +83,10 @@ def calculate_grade_level(score):
         return '及格'
     else:
         return '不及格'
+
+
+def generate_student_id():
+    return '2025' + ''.join(random.choices(string.digits, k=6))
 
 
 # 装饰器
@@ -115,7 +110,92 @@ def admin_required(f):
     return decorated
 
 
-# 路由 - 独立登录界面
+# 初始化数据库和测试数据
+with app.app_context():
+    db.create_all()
+
+    # 初始化管理员
+    if not Admin.query.filter_by(username='admin').first():
+        admin = Admin(username='admin', email='admin@example.com', password='admin123', is_super=True)
+        db.session.add(admin)
+
+    # 初始化班级数据（使用新的SchoolClass模型）
+    if not SchoolClass.query.first():
+        classes = [
+            SchoolClass(class_name='计算机科学与技术1班', major='计算机科学与技术', grade='2025级'),
+            SchoolClass(class_name='计算机科学与技术2班', major='计算机科学与技术', grade='2025级'),
+            SchoolClass(class_name='软件工程1班', major='软件工程', grade='2025级'),
+            SchoolClass(class_name='人工智能1班', major='人工智能', grade='2025级'),
+            SchoolClass(class_name='信息安全1班', major='信息安全', grade='2025级')
+        ]
+        db.session.add_all(classes)
+
+    # 初始化课程数据
+    if not Course.query.first():
+        courses = [
+            Course(course_code='MATH101', course_name='高等数学', credit=4.0, semester='2025-1'),
+            Course(course_code='ENG101', course_name='大学英语', credit=3.0, semester='2025-1'),
+            Course(course_code='PHY101', course_name='大学物理', credit=3.5, semester='2025-1'),
+            Course(course_code='PROG101', course_name='程序设计基础', credit=3.0, semester='2025-1'),
+            Course(course_code='POL101', course_name='思想政治', credit=2.0, semester='2025-1'),
+            Course(course_code='DS101', course_name='数据结构', credit=3.5, semester='2025-1'),
+            Course(course_code='OS101', course_name='操作系统', credit=3.0, semester='2025-2')
+        ]
+        db.session.add_all(courses)
+
+    # 生成5个测试学生数据
+    if User.query.count() <= 1:
+        students_data = [
+            {'username': 'student1', 'email': 'student1@example.com', 'password': '123456',
+             'name': '张三', 'gender': '男', 'class_name': '计算机科学与技术1班'},
+            {'username': 'student2', 'email': 'student2@example.com', 'password': '123456',
+             'name': '李四', 'gender': '女', 'class_name': '计算机科学与技术1班'},
+            {'username': 'student3', 'email': 'student3@example.com', 'password': '123456',
+             'name': '王五', 'gender': '男', 'class_name': '软件工程1班'},
+            {'username': 'student4', 'email': 'student4@example.com', 'password': '123456',
+             'name': '赵六', 'gender': '女', 'class_name': '人工智能1班'},
+            {'username': 'student5', 'email': 'student5@example.com', 'password': '123456',
+             'name': '钱七', 'gender': '男', 'class_name': '信息安全1班'}
+        ]
+
+        courses_list = Course.query.all()
+
+        for data in students_data:
+            user = User(
+                username=data['username'],
+                email=data['email'],
+                password=data['password']
+            )
+            db.session.add(user)
+            db.session.flush()
+
+            student = Student(
+                student_id=generate_student_id(),
+                name=data['name'],
+                gender=data['gender'],
+                class_name=data['class_name'],
+                user_id=user.id
+            )
+            db.session.add(student)
+            db.session.flush()
+
+            for course in random.sample(courses_list, 4):
+                score = round(random.uniform(60, 98), 1)
+                grade = Grade(
+                    student_id=student.id,
+                    course_id=course.id,
+                    score=score,
+                    grade_level=calculate_grade_level(score)
+                )
+                db.session.add(grade)
+
+    db.session.commit()
+
+
+# 其余路由代码保持不变...
+
+
+# 路由定义
 @app.route('/')
 def index():
     return redirect(url_for('login'))
@@ -127,7 +207,6 @@ def login():
         username = request.form.get('username')
         password = request.form.get('password')
 
-        # 用户登录验证
         user = User.query.filter_by(username=username, password=password).first()
         if not user and '@' in username:
             user = User.query.filter_by(email=username, password=password).first()
@@ -150,14 +229,13 @@ def admin_login():
         username = request.form.get('username')
         password = request.form.get('password')
 
-        # 管理员登录验证
         admin = Admin.query.filter_by(username=username, password=password).first()
         if admin:
             session['username'] = admin.username
             session['role'] = 'admin'
             session['user_id'] = admin.id
             session['expires_at'] = (datetime.now() + timedelta(hours=2)).timestamp()
-            return redirect(url_for('admin_dashboard'))
+            return redirect(url_for('admin_students'))
 
         flash('管理员账号或密码错误', 'error')
 
@@ -193,7 +271,7 @@ def register():
     return render_template('register.html')
 
 
-# 用户功能 - 只能查看自己的数据
+# 用户功能
 @app.route('/user/dashboard')
 @login_required
 def user_dashboard():
@@ -297,25 +375,51 @@ def delete_grade(grade_id):
 
 
 # 管理员功能
-@app.route('/admin/dashboard')
+@app.route('/admin/students')
 @admin_required
-def admin_dashboard():
-    user_count = User.query.count()
-    student_count = Student.query.count()
-    course_count = Course.query.count()
-    grade_count = Grade.query.count()
-
-    return render_template('admin/dashboard.html',
-                           user_count=user_count, student_count=student_count,
-                           course_count=course_count, grade_count=grade_count)
-
-
-@app.route('/admin/users')
-@admin_required
-def admin_users():
+def admin_students():
     page = request.args.get('page', 1, type=int)
-    users = User.query.order_by(User.created_at.desc()).paginate(page=page, per_page=10)
-    return render_template('admin/users.html', users=users)
+    search = request.args.get('search', '')
+
+    query = Student.query.join(User)
+    if search:
+        query = query.filter(
+            db.or_(
+                Student.name.contains(search),
+                Student.student_id.contains(search),
+                User.username.contains(search)
+            )
+        )
+
+    students = query.order_by(Student.class_name, Student.name).paginate(page=page, per_page=10)
+
+    return render_template('admin/students.html', students=students, search=search)
+
+
+@app.route('/admin/student/<int:student_id>')
+@admin_required
+def admin_student_detail(student_id):
+    student = Student.query.get_or_404(student_id)
+    grades = Grade.query.join(Course).filter(Grade.student_id == student.id).all()
+
+    return render_template('admin/student_detail.html', student=student, grades=grades)
+
+
+@app.route('/admin/courses')
+@admin_required
+def admin_courses():
+    courses = Course.query.all()
+    return render_template('admin/courses.html', courses=courses)
+
+
+@app.route('/admin/grades')
+@admin_required
+def admin_grades():
+    page = request.args.get('page', 1, type=int)
+    grades = Grade.query.join(Student).join(Course).order_by(Student.name, Course.course_name).paginate(page=page,
+                                                                                                        per_page=15)
+
+    return render_template('admin/grades.html', grades=grades)
 
 
 @app.route('/logout')

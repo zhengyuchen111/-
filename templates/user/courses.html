@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>课程列表 - 成绩管理系统</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Arial', sans-serif;
+        }
+
+        body {
+            background-color: #f0f2f5;
+            padding: 20px;
+            padding-top: 90px; /* 为固定导航栏留出空间 */
+        }
+
+        .header {
+            background-color: #1a73e8;
+            color: white;
+            padding: 15px 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            position: fixed;
+            top: 20px;
+            left: 20px;
+            right: 20px;
+            z-index: 1000;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+
+        .header-title {
+            flex: 1;
+            font-size: 1.2rem;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .nav {
+            display: flex;
+            gap: 5px;
+            flex-shrink: 0;
+        }
+
+        .nav a {
+            color: white;
+            text-decoration: none;
+            padding: 8px 15px;
+            margin: 0 2px;
+            border-radius: 4px;
+            transition: background-color 0.2s;
+            display: inline-block;
+            min-width: 80px;
+            text-align: center;
+        }
+
+        .nav a:hover {
+            background-color: rgba(255,255,255,0.2);
+        }
+
+        .nav a.active {
+            background-color: rgba(255,255,255,0.3);
+            font-weight: bold;
+        }
+
+        .card {
+            background-color: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+
+        h2 {
+            color: #1a73e8;
+            margin-bottom: 15px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #eee;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 15px;
+        }
+
+        th, td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #ddd;
+        }
+
+        th {
+            background-color: #f8f9fa;
+            color: #5f6368;
+        }
+
+        tr:hover {
+            background-color: #f8f9fa;
+        }
+
+        .badge {
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            color: white;
+        }
+
+        .badge-primary {
+            background-color: #1a73e8;
+        }
+
+        .badge-secondary {
+            background-color: #6c757d;
+        }
+
+        .level-excellent { background-color: #1e8e3e; }
+        .level-good { background-color: #34a853; }
+        .level-average { background-color: #f9ab00; }
+        .level-pass { background-color: #fbbc04; }
+        .level-fail { background-color: #d93025; }
+
+        .alert-warning {
+            padding: 12px;
+            border-radius: 4px;
+            margin-bottom: 15px;
+            background-color: #fff3cd;
+            color: #856404;
+            border: 1px solid #ffeeba;
+        }
+
+        .semester-tabs {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+
+        .semester-tab {
+            padding: 8px 15px;
+            background-color: #f8f9fa;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        .semester-tab.active {
+            background-color: #1a73e8;
+            color: white;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="header-title">学生成绩管理系统 - 课程列表</div>
+        <div class="nav">
+            <a href="{{ url_for('user_profile') }}">个人信息</a>
+            <a href="{{ url_for('user_grades') }}">我的成绩</a>
+            <a href="{{ url_for('user_courses') }}" class="active">课程列表</a>
+            <a href="{{ url_for('logout') }}">退出登录</a>
+        </div>
+    </div>
+
+    {% if not student %}
+    <div class="alert-warning">
+        您还未完善学生信息，请先<a href="{{ url_for('user_profile') }}">点击这里</a>补充信息
+    </div>
+    {% endif %}
+
+    <div class="card">
+        <h2>课程列表</h2>
+
+        <div class="semester-tabs">
+            <div class="semester-tab active">全部课程</div>
+            <div class="semester-tab">2025-1学期</div>
+            <div class="semester-tab">2025-2学期</div>
+        </div>
+
+        <table>
+            <thead>
+                <tr>
+                    <th>课程代码</th>
+                    <th>课程名称</th>
+                    <th>学分</th>
+                    <th>学期</th>
+                    <th>我的成绩</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for course in courses %}
+                <tr>
+                    <td>{{ course.course_code }}</td>
+                    <td>{{ course.course_name }}</td>
+                    <td>{{ course.credit }}</td>
+                    <td>{{ course.semester }}</td>
+                    <td>
+                        {% if course.id in selected_courses %}
+                            {% set grade = grades|selectattr('course_id', 'equalto', course.id)|first %}
+                            {% if grade %}
+                            <span class="badge
+                                {% if grade.grade_level == '优' %}level-excellent
+                                {% elif grade.grade_level == '良' %}level-good
+                                {% elif grade.grade_level == '中' %}level-average
+                                {% elif grade.grade_level == '及格' %}level-pass
+                                {% else %}level-fail{% endif %}">
+                                {{ grade.score }} ({{ grade.grade_level }})
+                            </span>
+                            {% endif %}
+                        {% else %}
+                        <span class="badge badge-secondary">暂无成绩</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</body>
+</html>

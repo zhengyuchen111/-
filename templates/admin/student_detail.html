@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>{{ student.name }} - 学生详情</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Arial', sans-serif;
+        }
+
+        body {
+            background-color: #f0f2f5;
+            padding: 20px;
+        }
+
+        .header {
+            background-color: #d93025;
+            color: white;
+            padding: 15px 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .header h1 {
+            font-size: 1.5rem;
+        }
+
+        .nav {
+            display: flex;
+            gap: 15px;
+        }
+
+        .nav a {
+            color: white;
+            text-decoration: none;
+            padding: 5px 10px;
+            border-radius: 4px;
+            transition: background-color 0.3s;
+        }
+
+        .nav a:hover {
+            background-color: rgba(255,255,255,0.2);
+        }
+
+        .card {
+            background-color: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+
+        h2 {
+            color: #d93025;
+            margin-bottom: 15px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #eee;
+        }
+
+        .info-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        .info-card {
+            background-color: #f8f9fa;
+            padding: 15px;
+            border-radius: 6px;
+            border-left: 4px solid #d93025;
+        }
+
+        .info-card p {
+            color: #666;
+            font-size: 0.9rem;
+            margin-bottom: 5px;
+        }
+
+        .info-card h3 {
+            color: #333;
+            font-size: 1.2rem;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 15px;
+        }
+
+        th, td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #ddd;
+        }
+
+        th {
+            background-color: #f8f9fa;
+            color: #5f6368;
+        }
+
+        tr:hover {
+            background-color: #f8f9fa;
+        }
+
+        .grade-level {
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            color: white;
+        }
+
+        .level-excellent { background-color: #1e8e3e; }
+        .level-good { background-color: #34a853; }
+        .level-average { background-color: #f9ab00; }
+        .level-pass { background-color: #fbbc04; }
+        .level-fail { background-color: #d93025; }
+
+        .back-btn {
+            display: inline-block;
+            margin-bottom: 20px;
+            padding: 8px 15px;
+            background-color: #1a73e8;
+            color: white;
+            text-decoration: none;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>学生成绩管理系统 - 管理员中心</h1>
+        <div class="nav">
+            <a href="{{ url_for('admin_students') }}">学生管理</a>
+            <a href="{{ url_for('admin_courses') }}">课程管理</a>
+            <a href="{{ url_for('admin_grades') }}">成绩管理</a>
+            <a href="{{ url_for('logout') }}">退出登录</a>
+        </div>
+    </div>
+
+    <a href="{{ url_for('admin_students') }}" class="back-btn">← 返回学生列表</a>
+
+    <div class="card">
+        <h2>{{ student.name }} 的个人信息</h2>
+
+        <div class="info-grid">
+            <div class="info-card">
+                <p>学号</p>
+                <h3>{{ student.student_id }}</h3>
+            </div>
+            <div class="info-card">
+                <p>姓名</p>
+                <h3>{{ student.name }}</h3>
+            </div>
+            <div class="info-card">
+                <p>性别</p>
+                <h3>{{ student.gender }}</h3>
+            </div>
+            <div class="info-card">
+                <p>班级</p>
+                <h3>{{ student.class_name }}</h3>
+            </div>
+            <div class="info-card">
+                <p>用户名</p>
+                <h3>{{ student.user.username }}</h3>
+            </div>
+            <div class="info-card">
+                <p>邮箱</p>
+                <h3>{{ student.user.email }}</h3>
+            </div>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>{{ student.name }} 的成绩表</h2>
+
+        {% if grades %}
+        <table>
+            <thead>
+                <tr>
+                    <th>课程代码</th>
+                    <th>课程名称</th>
+                    <th>学分</th>
+                    <th>成绩</th>
+                    <th>等级</th>
+                    <th>考试日期</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for grade in grades %}
+                <tr>
+                    <td>{{ grade.course.course_code }}</td>
+                    <td>{{ grade.course.course_name }}</td>
+                    <td>{{ grade.course.credit }}</td>
+                    <td>{{ grade.score }}</td>
+                    <td>
+                        <span class="grade-level
+                            {% if grade.grade_level == '优' %}level-excellent
+                            {% elif grade.grade_level == '良' %}level-good
+                            {% elif grade.grade_level == '中' %}level-average
+                            {% elif grade.grade_level == '及格' %}level-pass
+                            {% else %}level-fail{% endif %}">
+                            {{ grade.grade_level }}
+                        </span>
+                    </td>
+                    <td>{{ grade.exam_date.strftime('%Y-%m-%d') }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+
+        <div style="margin-top: 20px; padding: 15px; background-color: #f8f9fa; border-radius: 6px;">
+            <h3>成绩统计</h3>
+            <p>平均成绩：{{ "%.1f"|format(grades|map(attribute='score')|list|average) }}</p>
+            <p>课程总数：{{ grades|length }}</p>
+            <p>总学分：{{ grades|map(attribute='course.credit')|list|sum }}</p>
+        </div>
+        {% else %}
+        <p style="color: #666; padding: 20px;">该学生暂无成绩记录</p>
+        {% endif %}
+    </div>
+</body>
+</html>

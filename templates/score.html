@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>成绩查询 - 成绩管理系统</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Arial', sans-serif;
+        }
+
+        body {
+            background-color: #f0f2f5;
+            padding: 2rem;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background-color: white;
+            padding: 2rem;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        }
+
+        h1 {
+            color: #1a73e8;
+            margin-bottom: 1rem;
+            text-align: center;
+        }
+
+        .welcome {
+            text-align: center;
+            margin-bottom: 2rem;
+            color: #5f6368;
+        }
+
+        .rank-badge {
+            background-color: #1a73e8;
+            color: white;
+            padding: 0.5rem 1rem;
+            border-radius: 20px;
+            display: inline-block;
+            margin-bottom: 1.5rem;
+            font-weight: bold;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 1.5rem 0;
+        }
+
+        th, td {
+            padding: 0.8rem;
+            text-align: center;
+            border-bottom: 1px solid #dadce0;
+        }
+
+        th {
+            background-color: #f8f9fa;
+            color: #5f6368;
+            font-weight: 500;
+        }
+
+        .total-row {
+            font-weight: bold;
+            background-color: #f8f9fa;
+        }
+
+        .ranking-section {
+            margin-top: 2rem;
+            padding-top: 1.5rem;
+            border-top: 1px solid #dadce0;
+        }
+
+        .ranking-section h2 {
+            color: #1a73e8;
+            margin-bottom: 1rem;
+        }
+
+        .logout-btn {
+            background-color: #1a73e8;
+            color: white;
+            border: none;
+            padding: 0.8rem 1.5rem;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 1rem;
+            margin-top: 1.5rem;
+            display: block;
+            width: 100%;
+        }
+
+        .logout-btn:hover {
+            background-color: #1557b0;
+        }
+
+        .grade {
+            font-weight: bold;
+        }
+
+        .grade.high {
+            color: #1e8e3e;
+        }
+
+        .grade.medium {
+            color: #f59e0b;
+        }
+
+        .grade.low {
+            color: #d93025;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>学生成绩查询</h1>
+        <div class="welcome">欢迎回来，{{ username }}！</div>
+
+        <div class="rank-badge">当前排名：第 {{ current_rank }} 名</div>
+
+        <table>
+            <thead>
+                <tr>
+                    <th>科目</th>
+                    <th>成绩</th>
+                    <th>等级</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for subject, grade in scores %}
+                <tr>
+                    <td>{{ subject }}</td>
+                    <td>
+                        {% if grade >= 90 %}
+                        <span class="grade high">{{ grade }}</span>
+                        {% elif grade >= 70 %}
+                        <span class="grade medium">{{ grade }}</span>
+                        {% else %}
+                        <span class="grade low">{{ grade }}</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if grade >= 90 %}优秀{% elif grade >= 80 %}良好{% elif grade >= 70 %}中等{% elif grade >= 60 %}及格{% else %}不及格{% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+                <tr class="total-row">
+                    <td>总分</td>
+                    <td>{{ user_total }}</td>
+                    <td>平均分：{{ "%.1f"|format(user_total / scores|length) }}</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <div class="ranking-section">
+            <h2>班级排名</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>排名</th>
+                        <th>用户名</th>
+                        <th>总分</th>
+                    </tr>
+                </thead>
+                    <tbody>
+                        {% for rank, user, total in ranking_data %}
+                        <tr {% if user == username %}style="background-color: #e8f0fe;"{% endif %}>
+                            <td>{{ rank }}</td>
+                            <td>{{ user }}</td>
+                            <td>{{ total }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+            </table>
+        </div>
+
+        <button class="logout-btn" onclick="location.href='/logoff'">退出登录</button>
+    </div>
+</body>
+</html>

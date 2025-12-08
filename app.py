@@ -4,13 +4,23 @@ from flask_sqlalchemy import SQLAlchemy
 from functools import wraps
 import random
 import string
-from sqlalchemy import text
+from sqlalchemy import text, func
 
 app = Flask(__name__)
 app.secret_key = 'score_system_key_2025'
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///school_management.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
+
+# 邮件配置（请根据实际情况修改）
+app.config['MAIL_SERVER'] = 'smtp.qq.com'  # 邮件服务器
+app.config['MAIL_PORT'] = 587  # 端口
+app.config['MAIL_USERNAME'] = 'your_email@qq.com'  # 发送邮箱
+app.config['MAIL_PASSWORD'] = 'your_email_code'  # 邮箱授权码
+app.config['MAIL_USE_TLS'] = True
+
+# 存储验证码的临时字典
+verification_codes = {}
 
 
 # 数据库模型定义
@@ -88,6 +98,16 @@ def calculate_grade_level(score):
 
 def generate_student_id():
     return '2025' + ''.join(random.choices(string.digits, k=6))
+
+
+def send_verification_email(email, code):
+    print(f"验证码：{code}（邮箱：{email}）")
+    return True
+
+
+# 生成6位数字验证码
+def generate_verification_code():
+    return ''.join(random.choices(string.digits, k=6))
 
 
 # 添加Jinja2过滤器
@@ -287,6 +307,131 @@ def login():
     return render_template('login.html')
 
 
+# 忘记密码路由
+@app.route('/forgot-password', methods=['GET', 'POST'])
+def forgot_password():
+    if request.method == 'POST':
+        # 第一步：验证邮箱并发送验证码
+        if 'step' not in request.form or request.form['step'] == '1':
+            email = request.form.get('email', '').strip()
+
+            if not email:
+                flash('请输入注册时使用的邮箱！', 'error')
+                return render_template('forgot_password.html', step=1)
+
+            # 检查邮箱是否存在
+            user = User.query.filter_by(email=email).first()
+            if not user:
+                flash('该邮箱未注册，请检查邮箱地址！', 'error')
+                return render_template('forgot_password.html', step=1)
+
+            # 生成验证码
+            code = generate_verification_code()
+            # 存储验证码（10分钟有效期）
+            verification_codes[email] = {
+                'code': code,
+                'expires_at': datetime.now() + timedelta(minutes=10),
+                'user_id': user.id
+            }
+
+            # 发送验证码邮件
+            if send_verification_email(email, code):
+                flash('验证码已发送到您的邮箱，请在10分钟内完成验证！', 'success')
+                return render_template('forgot_password.html', step=2, email=email)
+            else:
+                flash('发送验证码失败，请稍后重试！', 'error')
+                return render_template('forgot_password.html', step=1)
+
+        # 第二步：验证验证码
+        elif request.form['step'] == '2':
+            email = request.form.get('email', '').strip()
+            input_code = request.form.get('code', '').strip()
+
+            # 检查验证码
+            if email not in verification_codes:
+                flash('验证码已过期，请重新获取！', 'error')
+                return render_template('forgot_password.html', step=1)
+
+            code_info = verification_codes[email]
+            if datetime.now() > code_info['expires_at']:
+                del verification_codes[email]
+                flash('验证码已过期，请重新获取！', 'error')
+                return render_template('forgot_password.html', step=1)
+
+            if input_code != code_info['code']:
+                flash('验证码错误，请重新输入！', 'error')
+                return render_template('forgot_password.html', step=2, email=email)
+
+            # 验证码正确，进入重置密码步骤
+            return render_template('forgot_password.html', step=3, email=email, user_id=code_info['user_id'])
+
+        # 第三步：重置密码
+        elif request.form['step'] == '3':
+            user_id = request.form.get('user_id')
+            new_password = request.form.get('password')
+            confirm_password = request.form.get('confirm_password')
+
+            if not new_password or not confirm_password:
+                flash('密码不能为空！', 'error')
+                return render_template('forgot_password.html', step=3, email=request.form.get('email'), user_id=user_id)
+
+            if new_password != confirm_password:
+                flash('两次输入的密码不一致！', 'error')
+                return render_template('forgot_password.html', step=3, email=request.form.get('email'), user_id=user_id)
+
+            # 更新密码
+            user = User.query.get(user_id)
+            if user:
+                user.password = new_password
+                db.session.commit()
+
+                # 清除验证码
+                if user.email in verification_codes:
+                    del verification_codes[user.email]
+
+                flash('密码重置成功！请使用新密码登录。', 'success')
+                return redirect(url_for('login'))
+            else:
+                flash('用户不存在！', 'error')
+                return redirect(url_for('forgot_password'))
+
+    # GET请求，显示第一步
+    return render_template('forgot_password.html', step=1)
+
+
+# 注销账号路由
+@app.route('/user/delete-account', methods=['POST'])
+@login_required
+def delete_account():
+    user_id = session.get('user_id')
+    user = User.query.get(user_id)
+
+    if not user:
+        flash('用户不存在！', 'error')
+        return redirect(url_for('login'))
+
+    # 检查是否已解绑学生
+    student = Student.query.filter_by(user_id=user_id, is_bound=True).first()
+    if student:
+        flash('注销账号前必须先解绑学生信息！', 'error')
+        return redirect(url_for('user_profile'))
+
+    try:
+        # 删除用户账号
+        db.session.delete(user)
+        db.session.commit()
+
+        # 清除session
+        session.clear()
+
+        flash('账号已成功注销！', 'success')
+        return redirect(url_for('login'))
+    except Exception as e:
+        db.session.rollback()
+        flash(f'注销账号失败：{str(e)}', 'error')
+        return redirect(url_for('user_profile'))
+
+
 @app.route('/admin/login', methods=['GET', 'POST'])
 def admin_login():
     if request.method == 'POST':
@@ -476,6 +621,13 @@ def user_grades():
     student = user.student
     grades = []
     courses = Course.query.all()
+    total_score = 0
+    total_credit = 0
+    weighted_average = 0
+    ranking = 0
+    class_ranking = 0
+    all_students_scores = []
+    class_students_scores = []
 
     if student:
         grades = Grade.query.join(Course).filter(Grade.student_id == student.id).all()
@@ -487,6 +639,47 @@ def user_grades():
             excellent_count = len([g for g in grades if g.grade_level == '优'])
             pass_count = len([g for g in grades if g.grade_level != '不及格'])
             pass_rate = (pass_count / len(grades)) * 100 if grades else 0
+
+            # 计算总成绩和学分加权平均分
+            total_score = sum(scores)
+            for grade in grades:
+                total_credit += grade.course.credit
+                weighted_average += grade.score * grade.course.credit
+
+            if total_credit > 0:
+                weighted_average = weighted_average / total_credit
+
+            # 获取所有学生的总成绩用于排名
+            # 计算每个学生的总成绩
+            all_students = Student.query.filter(Student.is_bound == True).all()
+            for s in all_students:
+                s_grades = Grade.query.filter_by(student_id=s.id).all()
+                if s_grades:
+                    s_total = sum([g.score for g in s_grades])
+                    all_students_scores.append({
+                        'student_id': s.id,
+                        'name': s.name,
+                        'total_score': s_total,
+                        'class_name': s.class_name
+                    })
+
+            # 按总成绩降序排序
+            all_students_scores.sort(key=lambda x: x['total_score'], reverse=True)
+
+            # 计算当前学生的排名
+            for i, s in enumerate(all_students_scores):
+                if s['student_id'] == student.id:
+                    ranking = i + 1
+                    break
+
+            # 计算班级排名
+            class_students_scores = [s for s in all_students_scores if s['class_name'] == student.class_name]
+            class_students_scores.sort(key=lambda x: x['total_score'], reverse=True)
+
+            for i, s in enumerate(class_students_scores):
+                if s['student_id'] == student.id:
+                    class_ranking = i + 1
+                    break
         else:
             average_score = 0
             excellent_count = 0
@@ -503,7 +696,13 @@ def user_grades():
                            courses=courses,
                            average_score=average_score,
                            excellent_count=excellent_count,
-                           pass_rate=pass_rate)
+                           pass_rate=pass_rate,
+                           total_score=total_score,
+                           weighted_average=weighted_average,
+                           ranking=ranking,
+                           class_ranking=class_ranking,
+                           total_students=len(all_students_scores),
+                           class_total_students=len(class_students_scores))
 
 
 @app.route('/user/courses')
@@ -754,10 +953,10 @@ def admin_delete_grade(grade_id):
     grade = Grade.query.get_or_404(grade_id)
     db.session.delete(grade)
     db.session.commit()
-# 成绩删除功能
+
     flash('成绩已删除！', 'success')
     return redirect(url_for('admin_grades'))
-#忘记密码，代码块提交
+
 
 if __name__ == '__main__':
     app.run(debug=True)

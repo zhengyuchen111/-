@@ -1,13 +1,13 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>用户登录 - 成绩管理系统</title>
+    <title>登录 - 学生成绩管理系统</title>
     <style>
         * {
             margin: 0;
             padding: 0;
             box-sizing: border-box;
-            font-family: 'Arial', sans-serif;
+            font-family: Arial, sans-serif;
         }
 
         body {
@@ -16,137 +16,115 @@
             justify-content: center;
             align-items: center;
             min-height: 100vh;
+            padding: 20px;
         }
 
         .login-container {
             background-color: white;
-            padding: 2.5rem;
-            border-radius: 10px;
-            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            padding: 40px;
             width: 100%;
             max-width: 400px;
         }
 
-        h1 {
-            color: #1a73e8;
+        .logo {
             text-align: center;
-            margin-bottom: 1.5rem;
+            margin-bottom: 30px;
+        }
+
+        .logo h1 {
+            color: #1a73e8;
             font-size: 1.8rem;
         }
 
         .form-group {
-            margin-bottom: 1.2rem;
+            margin-bottom: 20px;
         }
 
         label {
             display: block;
-            margin-bottom: 0.5rem;
+            margin-bottom: 8px;
             color: #5f6368;
             font-weight: 500;
         }
 
         input {
             width: 100%;
-            padding: 0.8rem;
-            border: 1px solid #dadce0;
-            border-radius: 6px;
+            padding: 12px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
             font-size: 1rem;
-            transition: border 0.3s;
         }
 
-        input:focus {
-            outline: none;
-            border-color: #1a73e8;
-            box-shadow: 0 0 0 2px rgba(26, 115, 232, 0.2);
-        }
-
-        .error-message {
-            color: #d93025;
-            text-align: center;
-            margin: 1rem 0;
-            padding: 0.8rem;
-            background-color: #fee;
-            border-radius: 6px;
-            border-left: 4px solid #d93025;
-        }
-
-        .success-message {
-            color: #1e8e3e;
-            text-align: center;
-            margin: 1rem 0;
-            padding: 0.8rem;
-            background-color: #efe;
-            border-radius: 6px;
-            border-left: 4px solid #1e8e3e;
-        }
-
-        button[type="submit"] {
+        .btn {
             width: 100%;
-            padding: 0.8rem;
+            padding: 12px;
             background-color: #1a73e8;
             color: white;
             border: none;
-            border-radius: 6px;
+            border-radius: 4px;
+            cursor: pointer;
             font-size: 1rem;
             font-weight: 500;
-            cursor: pointer;
-            transition: background-color 0.3s;
-            margin-top: 0.5rem;
+            margin-top: 10px;
         }
 
-        button[type="submit"]:hover {
+        .btn:hover {
             background-color: #1557b0;
         }
 
-        .form-footer {
+        .links {
             display: flex;
             justify-content: space-between;
-            margin-top: 1.5rem;
+            margin-top: 15px;
             font-size: 0.9rem;
         }
 
-        .form-footer a {
+        .links a {
             color: #1a73e8;
             text-decoration: none;
         }
 
-        .form-footer a:hover {
+        .links a:hover {
             text-decoration: underline;
+        }
+
+        .alert {
+            padding: 12px;
+            border-radius: 4px;
+            margin-bottom: 20px;
+        }
+
+        .alert-error {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+
+        .alert-success {
+            background-color: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
         }
 
         .admin-link {
             text-align: center;
-            margin-top: 1rem;
+            margin-top: 20px;
             font-size: 0.9rem;
-        }
-
-        .password-container {
-            position: relative;
-        }
-
-        .toggle-password {
-            position: absolute;
-            right: 10px;
-            top: 65%;
-            transform: translateY(-50%);
-            background: none;
-            border: none;
-            color: #5f6368;
-            cursor: pointer;
-            width: auto;
-            padding: 0.2rem;
         }
     </style>
 </head>
 <body>
     <div class="login-container">
-        <h1>学生成绩管理系统</h1>
-        <h2 style="text-align: center; color: #5f6368; margin-bottom: 2rem; font-size: 1.2rem;">用户登录</h2>
+        <div class="logo">
+            <h1>学生成绩管理系统</h1>
+        </div>
 
         {% with messages = get_flashed_messages(with_categories=true) %}
         {% if messages %}
             {% for category, message in messages %}
-            <div class="{{ category }}-message">{{ message }}</div>
+            <div class="alert alert-{{ 'error' if category == 'error' else 'success' }}">{{ message }}</div>
             {% endfor %}
         {% endif %}
         {% endwith %}
@@ -154,34 +132,25 @@
         <form method="POST">
             <div class="form-group">
                 <label for="username">用户名/邮箱</label>
-                <input type="text" id="username" name="username" required
-                       placeholder="请输入用户名或邮箱" value="{{ request.form.username or '' }}">
+                <input type="text" id="username" name="username" required placeholder="请输入用户名或邮箱">
             </div>
 
-            <div class="form-group password-container">
+            <div class="form-group">
                 <label for="password">密码</label>
                 <input type="password" id="password" name="password" required placeholder="请输入密码">
-                <button type="button" class="toggle-password" onclick="togglePassword()">👁️</button>
             </div>
 
-            <button type="submit">登录</button>
+            <button type="submit" class="btn">登录</button>
 
-            <div class="form-footer">
+            <div class="links">
+                <a href="{{ url_for('forgot_password') }}">忘记密码？</a>
                 <a href="{{ url_for('register') }}">注册账号</a>
-                <a href="#">忘记密码？</a>
             </div>
         </form>
 
         <div class="admin-link">
-            <a href="{{ url_for('admin_login') }}">管理员请点击这里登录</a>
+            <a href="{{ url_for('admin_login') }}">管理员登录</a>
         </div>
     </div>
-
-    <script>
-        function togglePassword() {
-            const passwordField = document.getElementById('password');
-            passwordField.type = passwordField.type === 'password' ? 'text' : 'password';
-        }
-    </script>
 </body>
 </html>

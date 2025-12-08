@@ -5,12 +5,25 @@ from functools import wraps
 import random
 import string
 from sqlalchemy import text
+import smtplib
+from email.mime.text import MIMEText
+from email.header import Header
 
 app = Flask(__name__)
 app.secret_key = 'score_system_key_2025'
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///school_management.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
+
+# 邮件配置（请根据实际情况修改）
+app.config['MAIL_SERVER'] = 'smtp.qq.com'  # 邮件服务器
+app.config['MAIL_PORT'] = 587  # 端口
+app.config['MAIL_USERNAME'] = 'your_email@qq.com'  # 发送邮箱
+app.config['MAIL_PASSWORD'] = 'your_email_code'  # 邮箱授权码
+app.config['MAIL_USE_TLS'] = True
+
+# 存储验证码的临时字典
+verification_codes = {}
 
 
 # 数据库模型定义
@@ -88,6 +101,17 @@ def calculate_grade_level(score):
 
 def generate_student_id():
     return '2025' + ''.join(random.choices(string.digits, k=6))
+
+
+# 发送验证码邮件
+def send_verification_email(email, code):
+    print(f"验证码：{code}（邮箱：{email}）")
+    return True
+
+
+# 生成6位数字验证码
+def generate_verification_code():
+    return ''.join(random.choices(string.digits, k=6))
 
 
 # 添加Jinja2过滤器
@@ -285,6 +309,98 @@ def login():
         flash('用户名/密码错误或账号已禁用', 'error')
 
     return render_template('login.html')
+
+
+# 忘记密码路由
+@app.route('/forgot-password', methods=['GET', 'POST'])
+def forgot_password():
+    if request.method == 'POST':
+        # 第一步：验证邮箱并发送验证码
+        if 'step' not in request.form or request.form['step'] == '1':
+            email = request.form.get('email', '').strip()
+
+            if not email:
+                flash('请输入注册时使用的邮箱！', 'error')
+                return render_template('forgot_password.html', step=1)
+
+            # 检查邮箱是否存在
+            user = User.query.filter_by(email=email).first()
+            if not user:
+                flash('该邮箱未注册，请检查邮箱地址！', 'error')
+                return render_template('forgot_password.html', step=1)
+
+            # 生成验证码
+            code = generate_verification_code()
+            # 存储验证码（10分钟有效期）
+            verification_codes[email] = {
+                'code': code,
+                'expires_at': datetime.now() + timedelta(minutes=10),
+                'user_id': user.id
+            }
+
+            # 发送验证码邮件
+            if send_verification_email(email, code):
+                flash('验证码已发送到您的邮箱，请在10分钟内完成验证！', 'success')
+                return render_template('forgot_password.html', step=2, email=email)
+            else:
+                flash('发送验证码失败，请稍后重试！', 'error')
+                return render_template('forgot_password.html', step=1)
+
+        # 第二步：验证验证码
+        elif request.form['step'] == '2':
+            email = request.form.get('email', '').strip()
+            input_code = request.form.get('code', '').strip()
+
+            # 检查验证码
+            if email not in verification_codes:
+                flash('验证码已过期，请重新获取！', 'error')
+                return render_template('forgot_password.html', step=1)
+
+            code_info = verification_codes[email]
+            if datetime.now() > code_info['expires_at']:
+                del verification_codes[email]
+                flash('验证码已过期，请重新获取！', 'error')
+                return render_template('forgot_password.html', step=1)
+
+            if input_code != code_info['code']:
+                flash('验证码错误，请重新输入！', 'error')
+                return render_template('forgot_password.html', step=2, email=email)
+
+            # 验证码正确，进入重置密码步骤
+            return render_template('forgot_password.html', step=3, email=email, user_id=code_info['user_id'])
+
+        # 第三步：重置密码
+        elif request.form['step'] == '3':
+            user_id = request.form.get('user_id')
+            new_password = request.form.get('password')
+            confirm_password = request.form.get('confirm_password')
+
+            if not new_password or not confirm_password:
+                flash('密码不能为空！', 'error')
+                return render_template('forgot_password.html', step=3, email=request.form.get('email'), user_id=user_id)
+
+            if new_password != confirm_password:
+                flash('两次输入的密码不一致！', 'error')
+                return render_template('forgot_password.html', step=3, email=request.form.get('email'), user_id=user_id)
+
+            # 更新密码
+            user = User.query.get(user_id)
+            if user:
+                user.password = new_password
+                db.session.commit()
+
+                # 清除验证码
+                if user.email in verification_codes:
+                    del verification_codes[user.email]
+
+                flash('密码重置成功！请使用新密码登录。', 'success')
+                return redirect(url_for('login'))
+            else:
+                flash('用户不存在！', 'error')
+                return redirect(url_for('forgot_password'))
+
+    # GET请求，显示第一步
+    return render_template('forgot_password.html', step=1)
 
 
 @app.route('/admin/login', methods=['GET', 'POST'])

@@ -870,10 +870,10 @@ def admin_delete_grade(grade_id):
     grade = Grade.query.get_or_404(grade_id)
     db.session.delete(grade)
     db.session.commit()
-
+# 成绩删除功能
     flash('成绩已删除！', 'success')
     return redirect(url_for('admin_grades'))
-
+#忘记密码，代码块提交
 
 if __name__ == '__main__':
     app.run(debug=True)

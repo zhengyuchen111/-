@@ -218,9 +218,9 @@
     <div class="header">
         <div class="header-title">学生成绩管理系统 - 个人信息</div>
         <div class="nav">
+            <a href="{{ url_for('user_profile') }}" class="active">个人信息</a>
             <a href="{{ url_for('user_grades') }}">我的成绩</a>
             <a href="{{ url_for('user_courses') }}">我的课程</a>
-            <a href="{{ url_for('user_profile') }}" class="active">个人信息</a>
             <a href="{{ url_for('logout') }}">退出登录</a>
         </div>
     </div>

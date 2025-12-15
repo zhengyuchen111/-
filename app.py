@@ -4,10 +4,7 @@ from flask_sqlalchemy import SQLAlchemy
 from functools import wraps
 import random
 import string
-from sqlalchemy import text
-import smtplib
-from email.mime.text import MIMEText
-from email.header import Header
+from sqlalchemy import text, func
 
 app = Flask(__name__)
 app.secret_key = 'score_system_key_2025'
@@ -103,7 +100,6 @@ def generate_student_id():
     return '2025' + ''.join(random.choices(string.digits, k=6))
 
 
-# 发送验证码邮件
 def send_verification_email(email, code):
     print(f"验证码：{code}（邮箱：{email}）")
     return True
@@ -403,6 +399,39 @@ def forgot_password():
     return render_template('forgot_password.html', step=1)
 
 
+# 注销账号路由
+@app.route('/user/delete-account', methods=['POST'])
+@login_required
+def delete_account():
+    user_id = session.get('user_id')
+    user = User.query.get(user_id)
+
+    if not user:
+        flash('用户不存在！', 'error')
+        return redirect(url_for('login'))
+
+    # 检查是否已解绑学生
+    student = Student.query.filter_by(user_id=user_id, is_bound=True).first()
+    if student:
+        flash('注销账号前必须先解绑学生信息！', 'error')
+        return redirect(url_for('user_profile'))
+
+    try:
+        # 删除用户账号
+        db.session.delete(user)
+        db.session.commit()
+
+        # 清除session
+        session.clear()
+
+        flash('账号已成功注销！', 'success')
+        return redirect(url_for('login'))
+    except Exception as e:
+        db.session.rollback()
+        flash(f'注销账号失败：{str(e)}', 'error')
+        return redirect(url_for('user_profile'))
+
+
 @app.route('/admin/login', methods=['GET', 'POST'])
 def admin_login():
     if request.method == 'POST':
@@ -592,6 +621,13 @@ def user_grades():
     student = user.student
     grades = []
     courses = Course.query.all()
+    total_score = 0
+    total_credit = 0
+    weighted_average = 0
+    ranking = 0
+    class_ranking = 0
+    all_students_scores = []
+    class_students_scores = []
 
     if student:
         grades = Grade.query.join(Course).filter(Grade.student_id == student.id).all()
@@ -603,6 +639,47 @@ def user_grades():
             excellent_count = len([g for g in grades if g.grade_level == '优'])
             pass_count = len([g for g in grades if g.grade_level != '不及格'])
             pass_rate = (pass_count / len(grades)) * 100 if grades else 0
+
+            # 计算总成绩和学分加权平均分
+            total_score = sum(scores)
+            for grade in grades:
+                total_credit += grade.course.credit
+                weighted_average += grade.score * grade.course.credit
+
+            if total_credit > 0:
+                weighted_average = weighted_average / total_credit
+
+            # 获取所有学生的总成绩用于排名
+            # 计算每个学生的总成绩
+            all_students = Student.query.filter(Student.is_bound == True).all()
+            for s in all_students:
+                s_grades = Grade.query.filter_by(student_id=s.id).all()
+                if s_grades:
+                    s_total = sum([g.score for g in s_grades])
+                    all_students_scores.append({
+                        'student_id': s.id,
+                        'name': s.name,
+                        'total_score': s_total,
+                        'class_name': s.class_name
+                    })
+
+            # 按总成绩降序排序
+            all_students_scores.sort(key=lambda x: x['total_score'], reverse=True)
+
+            # 计算当前学生的排名
+            for i, s in enumerate(all_students_scores):
+                if s['student_id'] == student.id:
+                    ranking = i + 1
+                    break
+
+            # 计算班级排名
+            class_students_scores = [s for s in all_students_scores if s['class_name'] == student.class_name]
+            class_students_scores.sort(key=lambda x: x['total_score'], reverse=True)
+
+            for i, s in enumerate(class_students_scores):
+                if s['student_id'] == student.id:
+                    class_ranking = i + 1
+                    break
         else:
             average_score = 0
             excellent_count = 0
@@ -619,7 +696,13 @@ def user_grades():
                            courses=courses,
                            average_score=average_score,
                            excellent_count=excellent_count,
-                           pass_rate=pass_rate)
+                           pass_rate=pass_rate,
+                           total_score=total_score,
+                           weighted_average=weighted_average,
+                           ranking=ranking,
+                           class_ranking=class_ranking,
+                           total_students=len(all_students_scores),
+                           class_total_students=len(class_students_scores))
 
 
 @app.route('/user/courses')
@@ -870,10 +953,10 @@ def admin_delete_grade(grade_id):
     grade = Grade.query.get_or_404(grade_id)
     db.session.delete(grade)
     db.session.commit()
-# 成绩删除功能
+
     flash('成绩已删除！', 'success')
     return redirect(url_for('admin_grades'))
-#忘记密码，代码块提交
+
 
 if __name__ == '__main__':
     app.run(debug=True)

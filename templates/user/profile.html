@@ -99,6 +99,36 @@
             background-color: #c82333;
         }
 
+        .delete-account-section {
+            background-color: #fdf2f8;
+            border: 1px solid #fce7f3;
+            border-radius: 8px;
+            padding: 20px;
+            margin-top: 30px;
+        }
+
+        .delete-btn {
+            background-color: #e53e3e;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 1rem;
+            margin-top: 15px;
+        }
+
+        .delete-btn:hover {
+            background-color: #c53030;
+        }
+
+        .delete-note {
+            color: #e53e3e;
+            font-size: 0.9rem;
+            margin-top: 10px;
+            font-weight: bold;
+        }
+
         h2 {
             color: #1a73e8;
             margin-bottom: 20px;
@@ -186,11 +216,11 @@
 </head>
 <body>
     <div class="header">
-        <div class="header-title">学生成绩管理系统 - 个人中心</div>
+        <div class="header-title">学生成绩管理系统 - 个人信息</div>
         <div class="nav">
             <a href="{{ url_for('user_profile') }}" class="active">个人信息</a>
             <a href="{{ url_for('user_grades') }}">我的成绩</a>
-            <a href="{{ url_for('user_courses') }}">课程列表</a>
+            <a href="{{ url_for('user_courses') }}">我的课程</a>
             <a href="{{ url_for('logout') }}">退出登录</a>
         </div>
     </div>
@@ -317,5 +347,24 @@
             <button type="submit" class="btn">保存修改</button>
         </form>
     </div>
+
+    <!-- 注销账号区域 -->
+    <div class="delete-account-section">
+        <h3 style="color: #e53e3e; margin-bottom: 15px;">注销账号</h3>
+        <p>注销账号将永久删除您的账户信息，且无法恢复！</p>
+        <p class="delete-note">⚠️ 重要提示：注销账号前必须先解绑学生信息！</p>
+
+        <form id="deleteAccountForm" method="POST" action="{{ url_for('delete_account') }}" onsubmit="return confirmDelete();">
+            <button type="submit" class="delete-btn" {% if student %}disabled{% endif %}>
+                {% if student %}请先解绑学生信息{% else %}注销我的账号{% endif %}
+            </button>
+        </form>
+    </div>
+
+    <script>
+        function confirmDelete() {
+            return confirm('您确定要注销账号吗？此操作不可撤销，所有账号信息将被永久删除！');
+        }
+    </script>
 </body>
 </html>
